@@ -15,7 +15,7 @@
    ┌──────────────────┐   ┌──────────────────┐              ┌──────────────────┐
    │ 本地存档(HTML+MD) │   │ 163 邮箱发送      │              │ Web 管理系统      │
    │ 每日论文推送/     │   │ xzyxzy0202@163   │              │ 公众号论文观察台   │
-   │ YYYY.M.D/        │   │                  │              │ localhost:8031    │
+   │ YYYY.M.D/        │   │                  │              │ localhost:8032    │
    └──────────────────┘   └──────────────────┘              └──────────────────┘
 ```
 
@@ -40,7 +40,7 @@
 │   ├── install_startup.py     # 安装/卸载开机自启动脚本
 │   └── requirements.txt       # Python 依赖
 ├── web/
-│   ├── paper_observatory.py   # Web 后端（纯标准库，端口 8031）
+│   ├── paper_observatory.py   # Web 后端（纯标准库，端口 8032）
 │   ├── paper_observatory.html # Web 前端页面
 │   ├── paper_observatory.css  # 前端样式（墨色+纸面+氧化绿+铜橙）
 │   ├── paper_observatory.js   # 前端交互
@@ -101,10 +101,10 @@
 
 ```bash
 cd web
-python paper_observatory.py --port 8031
+python paper_observatory.py --port 8032
 ```
 
-浏览器打开 http://127.0.0.1:8031，功能：
+浏览器打开 http://127.0.0.1:8032，功能：
 - 全局总览（指标条 + 公众号卡片）
 - 点公众号 → 按日期倒序的历史归档，翻页检索
 - 点文章 → 抽屉显示详情 + 原文链接

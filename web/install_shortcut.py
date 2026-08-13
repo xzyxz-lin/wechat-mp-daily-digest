@@ -72,7 +72,7 @@ if __name__ == "__main__":
         lnk_path=os.path.join(desktop, "公众号论文观察台.lnk"),
         target=r"A:\workbuddy项目\推送公众号论文\web\start_web.cmd",
         working_dir=r"A:\workbuddy项目\推送公众号论文\web",
-        description="公众号论文观察台 - 本地 Web 管理",
+        description="公众号论文观察台 - 本地 Web 管理 (http://127.0.0.1:8032)",
         show_cmd=7,
     )
     print(f"已创建快捷方式: {lnk}")

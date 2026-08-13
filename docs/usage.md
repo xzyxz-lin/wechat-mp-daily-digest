@@ -55,10 +55,10 @@ python install_startup.py --remove  # 卸载
 
 ```bash
 cd "A:\workbuddy项目\推送公众号论文\web"
-python paper_observatory.py --port 8031
+python paper_observatory.py --port 8032
 ```
 
-浏览器打开 http://127.0.0.1:8031：
+浏览器打开 http://127.0.0.1:8032：
 
 - **全局总览**：公众号数 / 累计文章 / 归档天数 / 最近归档
 - **公众号归档**：点侧边栏或卡片进入，按日期倒序翻页浏览历史推文

@@ -297,7 +297,7 @@ class Handler(BaseHTTPRequestHandler):
 def main():
     parser = argparse.ArgumentParser(description="公众号论文观察台")
     parser.add_argument("--host", default="0.0.0.0")
-    parser.add_argument("--port", type=int, default=8031)
+    parser.add_argument("--port", type=int, default=8032)
     args = parser.parse_args()
 
     reload_paths()
