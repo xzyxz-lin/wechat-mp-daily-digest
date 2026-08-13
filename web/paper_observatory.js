@@ -256,6 +256,17 @@
       </div>`).join("");
     console.log("[renderTimeline] html length=", html.length, "first 200:", html.slice(0, 200));
     accountArticles.innerHTML = html;
+    // 强制 page 显示：JS 别处可能移除了 is-visible，这里重新加 + inline style 兜底
+    const page = accountArticles.closest('.page');
+    if (page) {
+      document.querySelectorAll('.page').forEach(p => p.classList.remove('is-visible'));
+      page.classList.add('is-visible');
+      page.style.cssText = "display: block !important; min-height: 500px !important; visibility: visible !important; opacity: 1 !important;";
+      console.log("[renderTimeline] fixed page is-visible:", page.classList.contains('is-visible'),
+        "pageDisplay=", getComputedStyle(page).display, "pageH=", page.offsetHeight);
+    } else {
+      console.warn("[renderTimeline] #account-articles not inside .page!");
+    }
     // 强制可见：覆盖任何外部 CSS（包括残留的 display:grid / display:none / height:0）
     accountArticles.style.cssText = "display: block !important; min-height: 300px !important; visibility: visible !important; opacity: 1 !important;";
     const dg = accountArticles.querySelector(".date-group");
@@ -267,20 +278,22 @@
       "| containerH=", accountArticles.offsetHeight, "px",
       "| childCount=", accountArticles.children.length,
       "| firstChildH=", fc ? fc.offsetHeight : 'N/A', "px",
-      "| articleRowH=", ar ? ar.offsetHeight : 'N/A', "px");
+      "| articleRowH=", ar ? ar.offsetHeight : 'N/A', "px",
+      "| pageH=", page ? page.offsetHeight : 'N/A', "px");
     // 等一帧后再次确认 layout（强制同步）
     requestAnimationFrame(() => {
       const cs = getComputedStyle(accountArticles);
       const ar2 = accountArticles.querySelector(".article-row");
+      const page2 = accountArticles.closest('.page');
       console.log("[renderTimeline raf]",
         "container display=" + cs.display,
         "minH=" + cs.minHeight,
         "containerH=" + accountArticles.offsetHeight,
         "firstChildH=" + (fc ? fc.offsetHeight : 'N/A'),
         "articleRowH=" + (ar2 ? ar2.offsetHeight : 'N/A'),
-        "parent=" + accountArticles.parentElement.className,
-        "parentH=" + accountArticles.parentElement.offsetHeight,
-        "pageIsVisible=" + accountArticles.closest('.page')?.classList.contains('is-visible'));
+        "pageH=" + (page2 ? page2.offsetHeight : 'N/A'),
+        "pageDisplay=" + (page2 ? getComputedStyle(page2).display : 'N/A'),
+        "pageIsVisible=" + (page2 ? page2.classList.contains('is-visible') : 'N/A'));
     });
     accountArticles.querySelectorAll(".article-row").forEach((row) => {
       row.addEventListener("click", () => {
