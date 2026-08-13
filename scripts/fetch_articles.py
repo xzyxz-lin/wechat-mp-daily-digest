@@ -9,6 +9,7 @@
 """
 import json
 import sys
+import time
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
@@ -29,15 +30,29 @@ def load_config(path=None):
         return json.load(f)
 
 
-def fetch_all(base_url, auth_code=None):
-    """调用 WeWe RSS 的 /feeds/all.json 拉取所有文章。"""
+def fetch_all(base_url, auth_code=None, retries=10, retry_delay=15):
+    """调用 WeWe RSS 的 /feeds/all.json 拉取所有文章。
+
+    带重试：开机自启动时 Docker/容器可能尚未就绪，连接失败会等待重试。
+    默认最多重试 10 次、每次间隔 15 秒（约 2.5 分钟）。
+    """
     url = f"{base_url.rstrip('/')}/feeds/all.json"
     headers = {}
     if auth_code:
         headers["Authorization"] = f"Bearer {auth_code}"
-    resp = requests.get(url, headers=headers, timeout=30)
-    resp.raise_for_status()
-    return resp.json()
+    last_err = None
+    for i in range(retries):
+        try:
+            resp = requests.get(url, headers=headers, timeout=15)
+            resp.raise_for_status()
+            return resp.json()
+        except requests.exceptions.RequestException as e:
+            last_err = e
+            if i == retries - 1:
+                break
+            print(f"[fetch] 连接失败（第 {i+1}/{retries} 次），{retry_delay} 秒后重试: {e}")
+            time.sleep(retry_delay)
+    raise last_err
 
 
 def parse_date(s):
