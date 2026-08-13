@@ -4,24 +4,19 @@
     "auth_code": "123567",
     "feeds": [
       {
-        "name": "环境人Environmentor",
-        "feed_id": "REPLACE_WITH_REAL_FEED_ID"
+        "name": "环境人Environmentor"
       },
       {
-        "name": "REPLACE_WITH_MP_2",
-        "feed_id": "REPLACE_WITH_REAL_FEED_ID"
+        "name": "Environmental Advances"
       },
       {
-        "name": "REPLACE_WITH_MP_3",
-        "feed_id": "REPLACE_WITH_REAL_FEED_ID"
+        "name": "膜法笔记"
       },
       {
-        "name": "REPLACE_WITH_MP_4",
-        "feed_id": "REPLACE_WITH_REAL_FEED_ID"
+        "name": "环境工程与科学"
       },
       {
-        "name": "膜科学与工程",
-        "feed_id": "REPLACE_WITH_REAL_FEED_ID"
+        "name": "膜科学与工程"
       }
     ],
     "all_json_path": "/feeds/all.json"
@@ -32,7 +27,9 @@
     "use_ssl": true,
     "sender": "xzyxzy0202@163.com",
     "auth_code": "REPLACE_WITH_163_AUTH_CODE",
-    "receivers": ["xzyxzy0202@163.com"],
+    "receivers": [
+      "xzyxzy0202@163.com"
+    ],
     "subject_prefix": "【每日论文推送】"
   },
   "output": {

@@ -69,10 +69,13 @@ h1 { font-size: 24px; border-bottom: 2px solid #1855a5; padding-bottom: 8px; }
 </html>"""
 
 
-def html_summary(content_html, max_chars=200):
-    """从 content_html 提取纯文本摘要。"""
+def html_summary(content_html, max_chars=200, fallback=""):
+    """从 content_html 提取纯文本摘要。
+
+    若 content_html 为空（wewe-rss 默认非全文模式），返回 fallback（如文章标题）。
+    """
     if not content_html:
-        return ""
+        return fallback
     try:
         soup = BeautifulSoup(content_html, "lxml")
         text = soup.get_text(separator=" ", strip=True)
@@ -81,7 +84,7 @@ def html_summary(content_html, max_chars=200):
             text = text[:max_chars].rstrip() + "..."
         return text
     except Exception:
-        return ""
+        return fallback
 
 
 def make_anchor(idx):
@@ -112,7 +115,8 @@ def group_articles(articles, group_by_account=True, sort_desc=True):
 def render_html(articles, target_date_str, group_by_account=True, sort_desc=True, include_toc=True):
     """渲染 HTML 字符串。"""
     for i, a in enumerate(articles):
-        a["summary"] = html_summary(a.get("content_html", ""), 200)
+        # 摘要：content_html 为空时用 title 兜底
+        a["summary"] = html_summary(a.get("content_html", ""), 200, fallback=a.get("title", ""))
         a["anchor"] = make_anchor(i)
 
     groups = group_articles(articles, group_by_account, sort_desc)
@@ -141,7 +145,7 @@ def render_markdown(articles, target_date_str, group_by_account=True, sort_desc=
             lines.append(f"### [{a['title']}]({a['url']})\n\n")
             if a.get("date_published"):
                 lines.append(f"*{a['date_published']}*\n\n")
-            summary = html_summary(a.get("content_html", ""), 200)
+            summary = html_summary(a.get("content_html", ""), 200, fallback=a.get("title", ""))
             if summary:
                 lines.append(f"> {summary}\n\n")
             lines.append(f"[👉 阅读原文]({a['url']})\n\n---\n\n")
