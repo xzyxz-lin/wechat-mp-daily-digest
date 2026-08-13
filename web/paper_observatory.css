@@ -160,8 +160,8 @@ svg { width: 1.25rem; height: 1.25rem; fill: none; stroke: currentColor; stroke-
 .account-card .account-card__stats .is-alert strong { color: var(--copper-600); }
 
 /* ===== 时间线（文章归档） ===== */
-.date-timeline { display: grid; gap: 28px; }
-.date-group { border-left: 2px solid var(--paper-300); padding-left: 22px; }
+.date-timeline { display: block; gap: 28px; min-height: 100px; }
+.date-group { display: block; margin-bottom: 28px; border-left: 2px solid var(--paper-300); padding-left: 22px; }
 .date-group__head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 12px; }
 .date-group__head .dot { width: 9px; height: 9px; margin-left: -27px; margin-right: 8px; background: var(--oxide-600); border-radius: 50%; box-shadow: 0 0 0 4px rgba(42,109,103,.14); }
 .date-group__head h3 { margin: 0; font: 530 1.25rem var(--font-display); }

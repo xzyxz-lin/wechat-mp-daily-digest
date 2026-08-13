@@ -256,7 +256,11 @@
       </div>`).join("");
     console.log("[renderTimeline] html length=", html.length, "first 200:", html.slice(0, 200));
     accountArticles.innerHTML = html;
-    console.log("[renderTimeline] done, accountArticles.innerHTML length=", accountArticles.innerHTML.length);
+    const fc = accountArticles.firstElementChild;
+    console.log("[renderTimeline] done, accountArticles.innerHTML length=", accountArticles.innerHTML.length,
+      "| containerH=", accountArticles.offsetHeight, "px",
+      "| childCount=", accountArticles.children.length,
+      "| firstChildH=", fc ? fc.offsetHeight : 'N/A', "px");
     accountArticles.querySelectorAll(".article-row").forEach((row) => {
       row.addEventListener("click", () => {
         try {
