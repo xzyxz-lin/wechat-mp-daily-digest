@@ -268,6 +268,20 @@
       "| childCount=", accountArticles.children.length,
       "| firstChildH=", fc ? fc.offsetHeight : 'N/A', "px",
       "| articleRowH=", ar ? ar.offsetHeight : 'N/A', "px");
+    // 等一帧后再次确认 layout（强制同步）
+    requestAnimationFrame(() => {
+      const cs = getComputedStyle(accountArticles);
+      const ar2 = accountArticles.querySelector(".article-row");
+      console.log("[renderTimeline raf]",
+        "container display=" + cs.display,
+        "minH=" + cs.minHeight,
+        "containerH=" + accountArticles.offsetHeight,
+        "firstChildH=" + (fc ? fc.offsetHeight : 'N/A'),
+        "articleRowH=" + (ar2 ? ar2.offsetHeight : 'N/A'),
+        "parent=" + accountArticles.parentElement.className,
+        "parentH=" + accountArticles.parentElement.offsetHeight,
+        "pageIsVisible=" + accountArticles.closest('.page')?.classList.contains('is-visible'));
+    });
     accountArticles.querySelectorAll(".article-row").forEach((row) => {
       row.addEventListener("click", () => {
         try {
