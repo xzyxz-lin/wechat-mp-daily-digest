@@ -97,6 +97,6 @@ if (-not (Test-PaperObservatoryReady -Url $siteUrl)) {
 Write-Host "Ready: $siteUrl"
 if (-not $NoBrowser) {
     Start-Process explorer.exe -ArgumentList $siteUrl | Out-Null
-    Write-Host 'Browser launched. Press any key to close this window...'
-    $null = $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown')
+    Write-Host 'Browser launched. This window will close in 3 seconds...'
+    Start-Sleep -Seconds 3
 }
