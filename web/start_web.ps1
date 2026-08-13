@@ -21,14 +21,14 @@ $siteUrl = "http://127.0.0.1:$Port"
 function Test-PaperObservatoryReady {
     param([string]$Url)
     try {
-        $r = Invoke-WebRequest -UseBasicParsing -Uri ($Url + 'api/health') -TimeoutSec 2
+        $r = Invoke-WebRequest -UseBasicParsing -Uri ($Url + '/api/health') -TimeoutSec 2
         return $r.StatusCode -eq 200
     } catch { return $false }
 }
 
 function Test-WeWeReady {
     try {
-        $r = Invoke-WebRequest -UseBasicParsing -Uri ($weweUrl + 'feeds/all.json') -TimeoutSec 2
+        $r = Invoke-WebRequest -UseBasicParsing -Uri ($weweUrl + '/feeds/all.json') -TimeoutSec 2
         return $r.StatusCode -eq 200
     } catch { return $false }
 }
@@ -97,4 +97,6 @@ if (-not (Test-PaperObservatoryReady -Url $siteUrl)) {
 Write-Host "Ready: $siteUrl"
 if (-not $NoBrowser) {
     Start-Process explorer.exe -ArgumentList $siteUrl | Out-Null
+    Write-Host 'Browser launched. Press any key to close this window...'
+    $null = $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown')
 }
