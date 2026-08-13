@@ -102,10 +102,14 @@ def main():
         day_dir.mkdir(parents=True, exist_ok=True)
         html_path = day_dir / f"{day_folder}.html"
         md_path = day_dir / f"{day_folder}.md"
+        json_path = day_dir / "articles.json"
         html_path.write_text(html, encoding="utf-8")
         md_path.write_text(md, encoding="utf-8")
+        # 额外存一份结构化数据，供 Web 管理系统检索
+        json_path.write_text(json.dumps(articles, ensure_ascii=False, indent=2), encoding="utf-8")
         print(f"  - {html_path}")
         print(f"  - {md_path}")
+        print(f"  - {json_path}")
 
     # 4. 邮件
     if not args.no_email and not args.dry_run:
