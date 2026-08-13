@@ -256,11 +256,18 @@
       </div>`).join("");
     console.log("[renderTimeline] html length=", html.length, "first 200:", html.slice(0, 200));
     accountArticles.innerHTML = html;
+    // 强制可见：覆盖任何外部 CSS（包括残留的 display:grid / display:none / height:0）
+    accountArticles.style.cssText = "display: block !important; min-height: 300px !important; visibility: visible !important; opacity: 1 !important;";
+    const dg = accountArticles.querySelector(".date-group");
+    if (dg) dg.style.cssText = "display: block !important; min-height: 100px !important; visibility: visible !important;";
+    const ar = accountArticles.querySelector(".article-row");
+    if (ar) ar.style.cssText = "display: flex !important; min-height: 70px !important; visibility: visible !important; background: white !important; border: 1px solid #cbd1c8 !important;";
     const fc = accountArticles.firstElementChild;
     console.log("[renderTimeline] done, accountArticles.innerHTML length=", accountArticles.innerHTML.length,
       "| containerH=", accountArticles.offsetHeight, "px",
       "| childCount=", accountArticles.children.length,
-      "| firstChildH=", fc ? fc.offsetHeight : 'N/A', "px");
+      "| firstChildH=", fc ? fc.offsetHeight : 'N/A', "px",
+      "| articleRowH=", ar ? ar.offsetHeight : 'N/A', "px");
     accountArticles.querySelectorAll(".article-row").forEach((row) => {
       row.addEventListener("click", () => {
         try {
