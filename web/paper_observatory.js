@@ -149,15 +149,23 @@
       accountGrid.innerHTML = '<div class="empty">还没有归档数据，先点右上角「现场抓取」。</div>';
       return;
     }
-    accountGrid.innerHTML = accounts.map((a) => `
-      <div class="account-card" data-account="${escapeHtml(a.name)}">
-        <p class="account-card__code">${a.day_count} DAYS <b>·</b> ${a.last_date || "—"}</p>
+    accountGrid.innerHTML = accounts.map((a) => {
+      const isEmpty = a.article_count === 0;
+      const tag = isEmpty ? '<b>暂无</b>' : `${a.day_count} DAYS <b>·</b> ${a.last_date || "—"}`;
+      const emptyHint = isEmpty
+        ? '<p class="account-card__hint">点击进入后可点右上角「现场抓取」尝试</p>'
+        : "";
+      return `
+      <div class="account-card ${isEmpty ? "is-empty" : ""}" data-account="${escapeHtml(a.name)}">
+        <p class="account-card__code">${tag}</p>
         <h4>${escapeHtml(a.name)}</h4>
+        ${emptyHint}
         <div class="account-card__stats">
           <div><span>累计文章</span><strong>${a.article_count}</strong></div>
           <div class="is-alert"><span>归档天数</span><strong>${a.day_count}</strong></div>
         </div>
-      </div>`).join("");
+      </div>`;
+    }).join("");
     accountGrid.querySelectorAll(".account-card").forEach((card) => {
       card.addEventListener("click", () => openAccount(card.dataset.account));
     });
@@ -210,7 +218,12 @@
 
   function renderTimeline(articles) {
     if (!articles.length) {
-      accountArticles.innerHTML = '<div class="empty">该公众号暂无归档文章</div>';
+      accountArticles.innerHTML = `
+        <div class="empty empty--large">
+          <p>该公众号暂无归档文章</p>
+          <p class="empty-hint">可能原因：① 公众号今天没发文 ② WeWe RSS 订阅源还没拉到该公众号</p>
+          <p class="empty-hint">试试点右上角「现场抓取」，触发一次重新抓取</p>
+        </div>`;
       return;
     }
     // 按日期分组

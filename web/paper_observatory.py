@@ -85,20 +85,31 @@ def _date_key(date_str: str) -> str:
 
 
 def get_accounts() -> list[dict]:
-    """汇总每个公众号的文章数、天数、最近日期。"""
+    """汇总公众号：合并白名单（config.json）+ 本地存档（开放结构）。
+
+    白名单中的公众号即使暂无归档也会列出（article_count=0）。
+    本地存档中发现的额外公众号也会列出（has_whitelist=false）。
+    """
+    # 每次重新加载配置，保证白名单是最新
+    cfg = load_config()
+    whitelist = cfg.get("wewe_rss", {}).get("feeds", [])
+    whitelist_names = {f["name"] for f in whitelist if f.get("name")}
+
     archive = scan_archive()
     accs: dict[str, dict] = {}
     for date_str, articles in archive.items():
         for a in articles:
             name = a.get("account") or "未知公众号"
             if name not in accs:
-                accs[name] = {
-                    "name": name,
-                    "article_count": 0,
-                    "dates": set(),
-                }
+                accs[name] = {"name": name, "article_count": 0, "dates": set()}
             accs[name]["article_count"] += 1
             accs[name]["dates"].add(date_str)
+
+    # 加入白名单中暂无数据的公众号
+    for name in whitelist_names:
+        if name not in accs:
+            accs[name] = {"name": name, "article_count": 0, "dates": set()}
+
     result = []
     for name, acc in accs.items():
         dates = sorted(acc["dates"], key=_date_key, reverse=True)
@@ -108,8 +119,10 @@ def get_accounts() -> list[dict]:
             "day_count": len(dates),
             "last_date": dates[0] if dates else None,
             "dates": dates,
+            "in_whitelist": name in whitelist_names,
         })
-    result.sort(key=lambda x: x["article_count"], reverse=True)
+    # 排序：白名单优先（有数据更靠前），然后按文章数
+    result.sort(key=lambda x: (not x["in_whitelist"], -x["article_count"], x["name"]))
     return result
 
 

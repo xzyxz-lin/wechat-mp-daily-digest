@@ -212,6 +212,12 @@ svg { width: 1.25rem; height: 1.25rem; fill: none; stroke: currentColor; stroke-
 
 /* ===== 空状态 ===== */
 .empty { display: grid; place-items: center; min-height: 220px; color: var(--ink-700); font-size: .82rem; border: 1px dashed var(--paper-300); border-radius: 3px; }
+.empty--large { min-height: 360px; padding: 40px; text-align: center; gap: 8px; }
+.empty--large p { margin: 0; }
+.empty-hint { color: var(--ink-700); font-size: .74rem; opacity: .8; }
+.account-card__hint { margin: -2px 0 8px; color: var(--copper-600); font-size: .7rem; }
+.account-card.is-empty { opacity: .78; border-style: dashed; background: rgba(255,255,255,.4); }
+.account-card.is-empty:hover { opacity: 1; }
 
 @media (max-width: 900px) {
   .atlas-hero { grid-template-columns: 1fr; }
