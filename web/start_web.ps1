@@ -96,5 +96,5 @@ if (-not (Test-PaperObservatoryReady -Url $siteUrl)) {
 # ---- Step 4: open browser ----
 Write-Host "Ready: $siteUrl"
 if (-not $NoBrowser) {
-    Start-Process -FilePath $siteUrl | Out-Null
+    Start-Process explorer.exe -ArgumentList $siteUrl | Out-Null
 }
