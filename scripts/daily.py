@@ -80,10 +80,13 @@ def main():
     md_path = None
     if not args.no_local and not args.dry_run:
         print("\n[3/4] 保存到本地 ...")
-        output_dir = Path(config["output"]["local_dir"])
-        output_dir.mkdir(parents=True, exist_ok=True)
-        html_path = output_dir / f"{target_date_str}.html"
-        md_path = output_dir / f"{target_date_str}.md"
+        base_dir = Path(config["output"]["local_dir"])
+        # 按日期建子文件夹，命名格式：2026.8.13（月/日不带前导零）
+        day_folder = f"{target_date.year}.{target_date.month}.{target_date.day}"
+        day_dir = base_dir / day_folder
+        day_dir.mkdir(parents=True, exist_ok=True)
+        html_path = day_dir / f"{day_folder}.html"
+        md_path = day_dir / f"{day_folder}.md"
         html_path.write_text(html, encoding="utf-8")
         md_path.write_text(md, encoding="utf-8")
         print(f"  - {html_path}")
