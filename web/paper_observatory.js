@@ -207,12 +207,18 @@
   async function loadAccountArticles(account, page) {
     try {
       const data = await fetchJSON(`/api/articles?account=${encodeURIComponent(account)}&page=${page}&size=${state.pageSize}`);
+      console.log("[loadAccountArticles]", account, data);
       state.totalPages = data.total_pages || 1;
-      renderTimeline(data.articles);
-      renderPagination(data.page, data.total_pages);
+      renderTimeline(data.articles || []);
+      renderPagination(data.page, data.total_pages || 1);
       $("#page-info").textContent = `${data.page} / ${data.total_pages || 1}`;
     } catch (e) {
+      console.error("[loadAccountArticles] error:", e);
       showToast("加载文章失败：" + e.message, true);
+      accountArticles.innerHTML = `<div class="empty empty--large">
+        <p>加载失败</p><p class="empty-hint">${escapeHtml(e.message)}</p>
+        <p class="empty-hint">请刷新页面重试，或检查后端是否在 8031 端口运行</p>
+      </div>`;
     }
   }
 
