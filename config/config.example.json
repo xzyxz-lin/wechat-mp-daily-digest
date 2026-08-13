@@ -1,0 +1,48 @@
+{
+  "wewe_rss": {
+    "base_url": "http://localhost:4000",
+    "auth_code": "123567",
+    "feeds": [
+      {
+        "name": "环境人Environmentor",
+        "feed_id": "REPLACE_WITH_REAL_FEED_ID"
+      },
+      {
+        "name": "REPLACE_WITH_MP_2",
+        "feed_id": "REPLACE_WITH_REAL_FEED_ID"
+      },
+      {
+        "name": "REPLACE_WITH_MP_3",
+        "feed_id": "REPLACE_WITH_REAL_FEED_ID"
+      },
+      {
+        "name": "REPLACE_WITH_MP_4",
+        "feed_id": "REPLACE_WITH_REAL_FEED_ID"
+      },
+      {
+        "name": "膜科学与工程",
+        "feed_id": "REPLACE_WITH_REAL_FEED_ID"
+      }
+    ],
+    "all_json_path": "/feeds/all.json"
+  },
+  "email": {
+    "smtp_host": "smtp.163.com",
+    "smtp_port": 465,
+    "use_ssl": true,
+    "sender": "xzyxzy0202@163.com",
+    "auth_code": "REPLACE_WITH_163_AUTH_CODE",
+    "receivers": ["xzyxzy0202@163.com"],
+    "subject_prefix": "【每日论文推送】"
+  },
+  "output": {
+    "local_dir": "A:\\研零课题\\研零课题资料\\每日推送\\每日论文推送"
+  },
+  "render": {
+    "group_by_account": true,
+    "sort_desc": true,
+    "include_full_text": false,
+    "max_summary_chars": 200,
+    "include_toc": true
+  }
+}

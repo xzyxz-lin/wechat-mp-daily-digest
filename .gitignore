@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+.venv/
+
+# 配置（包含敏感信息）
+config/config.json
+
+# 环境变量
+.env
+.env.local
+
+# 数据与缓存
+data/
+*.log
+*.sqlite
+*.db
+.cache/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# WorkBuddy 工作记忆（保留目录但忽略内部文件）
+.workbuddy/memory/
+
+# WeWe RSS 源码（独立的 git 仓库，单独 clone）
+# 使用前请执行：git clone https://github.com/lxyoutlook/wewe-rss.git
+wewe-rss/
+
+# 微信读书扫码登录二维码缓存（如果有）
+.qrcode/
+
+# 备份
+*.bak
+*.tmp
