@@ -223,7 +223,9 @@
   }
 
   function renderTimeline(articles) {
-    if (!articles.length) {
+    console.log("[renderTimeline] called, type=", typeof articles, "isArray=", Array.isArray(articles), "len=", articles && articles.length);
+    if (!articles || !Array.isArray(articles) || !articles.length) {
+      console.log("[renderTimeline] -> empty branch");
       accountArticles.innerHTML = `
         <div class="empty empty--large">
           <p>该公众号暂无归档文章</p>
@@ -239,7 +241,7 @@
       if (!groups[d]) groups[d] = [];
       groups[d].push(a);
     });
-    accountArticles.innerHTML = Object.entries(groups).map(([date, list]) => `
+    const html = Object.entries(groups).map(([date, list]) => `
       <div class="date-group">
         <div class="date-group__head"><span class="dot"></span><h3>${formatDateLabel(date)}</h3><span>${list.length} 篇</span></div>
         ${list.map((a) => `
@@ -252,6 +254,9 @@
             <div class="article-row__arrow"><svg><use href="#i-arrow"/></svg></div>
           </div>`).join("")}
       </div>`).join("");
+    console.log("[renderTimeline] html length=", html.length, "first 200:", html.slice(0, 200));
+    accountArticles.innerHTML = html;
+    console.log("[renderTimeline] done, accountArticles.innerHTML length=", accountArticles.innerHTML.length);
     accountArticles.querySelectorAll(".article-row").forEach((row) => {
       row.addEventListener("click", () => {
         try {
