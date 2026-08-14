@@ -23,6 +23,11 @@
   const serviceDot = $("#service-dot");
   const serviceState = $("#service-state");
   const fetchButton = $("#fetch-button");
+  const fetchCustomButton = $("#fetch-custom-button");
+  const fetchCustomPop = $("#custom-fetch-pop");
+  const fetchCustomClose = $("#custom-fetch-close");
+  const fetchCustomDays = $("#custom-fetch-days");
+  const fetchCustomConfirm = $("#custom-fetch-confirm");
   const toast = $("#toast");
 
   // ===== 工具函数 =====
@@ -397,6 +402,55 @@
   }
 
   fetchButton.addEventListener("click", triggerFetch);
+
+  // ===== 自定义抓取（往前倒 N 天） =====
+  function openCustomFetch() {
+    fetchCustomPop.hidden = false;
+    fetchCustomDays.focus();
+    fetchCustomDays.select();
+  }
+  function closeCustomFetch() {
+    fetchCustomPop.hidden = true;
+  }
+  fetchCustomButton.addEventListener("click", openCustomFetch);
+  fetchCustomClose.addEventListener("click", closeCustomFetch);
+  fetchCustomPop.addEventListener("click", (e) => {
+    if (e.target === fetchCustomPop) closeCustomFetch();
+  });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeCustomFetch(); });
+
+  async function triggerCustomFetch() {
+    const raw = fetchCustomDays.value;
+    const days = parseInt(raw, 10);
+    if (isNaN(days) || days < 0 || days > 30) {
+      showToast("请输入 0~30 之间的天数", true);
+      return;
+    }
+    fetchCustomConfirm.disabled = true;
+    fetchCustomConfirm.classList.add("is-running");
+    fetchCustomConfirm.querySelector("span").textContent = "补抓中…";
+    try {
+      await fetchJSON("/api/fetch-custom", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ days }),
+      });
+      showToast(`自定义抓取已启动，往前补抓 ${days} 天…`);
+      closeCustomFetch();
+      pollFetchStatus();
+    } catch (e) {
+      showToast("启动补抓失败：" + e.message, true);
+      resetCustomFetchButton();
+    }
+  }
+
+  function resetCustomFetchButton() {
+    fetchCustomConfirm.disabled = false;
+    fetchCustomConfirm.classList.remove("is-running");
+    fetchCustomConfirm.querySelector("span").textContent = "开始补抓";
+  }
+
+  fetchCustomConfirm.addEventListener("click", triggerCustomFetch);
 
   // ===== 启动 =====
   checkHealth();

@@ -30,20 +30,23 @@ def load_config(path=None):
         return json.load(f)
 
 
-def fetch_all(base_url, auth_code=None, retries=10, retry_delay=15):
+def fetch_all(base_url, auth_code=None, retries=10, retry_delay=15, limit=2000):
     """调用 WeWe RSS 的 /feeds/all.json 拉取所有文章。
 
     带重试：开机自启动时 Docker/容器可能尚未就绪，连接失败会等待重试。
     默认最多重试 10 次、每次间隔 15 秒（约 2.5 分钟）。
+
+    注意：wewe-rss 的 /feeds/all.json 默认只返回 30 篇（limit 默认 30），
+    抓取历史日期文章时必须传足够大的 limit，否则会漏掉更早的文章。
     """
-    url = f"{base_url.rstrip('/')}/feeds/all.json"
+    url = f"{base_url.rstrip('/')}/feeds/all.json?limit={limit}"
     headers = {}
     if auth_code:
         headers["Authorization"] = f"Bearer {auth_code}"
     last_err = None
     for i in range(retries):
         try:
-            resp = requests.get(url, headers=headers, timeout=15)
+            resp = requests.get(url, headers=headers, timeout=20)
             resp.raise_for_status()
             return resp.json()
         except requests.exceptions.RequestException as e:

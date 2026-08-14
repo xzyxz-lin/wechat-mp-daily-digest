@@ -167,20 +167,28 @@ def fetch_dates(account: str | None = None) -> list[dict]:
     return result
 
 
-def start_fetch() -> None:
-    """后台跑 daily.py --force，实现现场抓取。"""
+def start_fetch(days: int | None = None) -> None:
+    """后台跑 daily.py，实现抓取。
+
+    days=None：现场抓取今天（--force）
+    days=N：从今天往前倒 N 天逐天抓取（含今天）
+    """
     global FETCH_STATE
     with FETCH_LOCK:
         if FETCH_STATE["running"]:
             return
         FETCH_STATE.update(running=True, startedAt=now_iso(), finishedAt=None, output="", code=None)
 
+    cmd = [str(PYTHON_EXE), str(DAILY_PY), "--force"]
+    if days is not None:
+        cmd += ["--days", str(days)]
+
     def worker():
         global FETCH_STATE
         try:
             proc = subprocess.run(
-                [str(PYTHON_EXE), str(DAILY_PY), "--force"],
-                capture_output=True, text=True, encoding="utf-8", timeout=300,
+                cmd,
+                capture_output=True, text=True, encoding="utf-8", timeout=600,
                 cwd=str(SCRIPTS_DIR),
             )
             with FETCH_LOCK:
@@ -290,6 +298,22 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/fetch":
             start_fetch()
             json_response(self, {"started": True, "message": "现场抓取已启动"})
+        elif path == "/api/fetch-custom":
+            # 读取 JSON body 中的 days 参数（往前倒多少天）
+            days = None
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+                if length > 0:
+                    body = self.rfile.read(length).decode("utf-8")
+                    payload = json.loads(body)
+                    days = int(payload.get("days", 0))
+            except Exception:
+                days = None
+            if days is None:
+                self._send_error(400, "缺少 days 参数")
+                return
+            start_fetch(days=days)
+            json_response(self, {"started": True, "message": f"自定义抓取已启动（往前 {days} 天）"})
         else:
             self._send_error(404, "Not Found")
 

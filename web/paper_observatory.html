@@ -53,11 +53,30 @@
         </div>
         <div class="topbar-actions">
           <div class="snapshot-time"><span>最近抓取</span><strong id="snapshot-time">读取中…</strong></div>
+          <button class="scan-button scan-button--ghost" id="fetch-custom-button" type="button" aria-label="自定义抓取历史日期">
+            <svg><use href="#i-calendar"/></svg><span>自定义抓取</span>
+          </button>
           <button class="scan-button" id="fetch-button" type="button" aria-label="现场抓取最新文章">
             <svg><use href="#i-refresh"/></svg><span>现场抓取</span>
           </button>
         </div>
       </header>
+
+      <div class="custom-fetch-pop" id="custom-fetch-pop" hidden>
+        <div class="custom-fetch-pop__inner">
+          <button class="icon-button" id="custom-fetch-close" type="button" aria-label="关闭"><svg><use href="#i-close"/></svg></button>
+          <p class="eyebrow">CUSTOM FETCH / BACKTRACK</p>
+          <h3>往前补抓多少天</h3>
+          <p class="custom-fetch-pop__hint">例如填 <b>3</b>，会依次抓取今天、昨天、前天、大前天（共 4 天）的文章；已抓过的日期自动跳过。</p>
+          <div class="custom-fetch-pop__row">
+            <input type="number" id="custom-fetch-days" min="0" max="30" value="1" step="1">
+            <span>天</span>
+          </div>
+          <button class="scan-button" id="custom-fetch-confirm" type="button">
+            <svg><use href="#i-calendar"/></svg><span>开始补抓</span>
+          </button>
+        </div>
+      </div>
 
       <section class="page is-visible" data-view="overview" aria-labelledby="page-title">
         <div class="atlas-hero">
