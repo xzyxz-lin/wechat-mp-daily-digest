@@ -19,7 +19,6 @@
   const metricStrip = $("#metric-strip");
   const topology = $("#topology");
   const dashboardCards = $("#dashboard-cards");
-  const aggregateArticles = $("#aggregate-articles");
   const accountArticles = $("#account-articles");
   const pageTitle = $("#page-title");
   const pageEyebrow = $("#page-eyebrow");
@@ -424,7 +423,6 @@
             snapshotTime.textContent = new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
             loadOverview();
             if (state.view === "account" && state.currentAccount) loadAccountArticles(state.currentAccount, 1);
-            if (state.view === "aggregate") loadAggregate(state.currentCategory, state.aggPage);
           } else {
             showToast("抓取失败，详见后端日志", true);
           }
@@ -487,17 +485,6 @@
     }
   }
   fetchCustomConfirm.addEventListener("click", triggerCustomFetch);
-
-  // ===== 聚合筛选 chips =====
-  $("#filter-chips").querySelectorAll(".chip").forEach((chip) => {
-    chip.addEventListener("click", () => {
-      $("#filter-chips").querySelectorAll(".chip").forEach((c) => c.classList.remove("is-active"));
-      chip.classList.add("is-active");
-      state.currentCategory = chip.dataset.cat || "";
-      state.aggPage = 1;
-      loadAggregate(state.currentCategory, 1);
-    });
-  });
 
   // ===== 启动 =====
   checkHealth();

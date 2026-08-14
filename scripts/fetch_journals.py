@@ -32,6 +32,63 @@ _HEADERS = {
 }
 
 
+# ===== LaTeX / 数学标记清理 =====
+# arXiv 标题常含 $...$、\beta、_2、\textit{} 等标记，需要转为可读文本
+
+_LATEX_GREEK = {
+    "alpha": "α", "beta": "β", "gamma": "γ", "delta": "δ", "epsilon": "ε",
+    "zeta": "ζ", "eta": "η", "theta": "θ", "iota": "ι", "kappa": "κ",
+    "lambda": "λ", "mu": "μ", "nu": "ν", "xi": "ξ", "pi": "π",
+    "rho": "ρ", "sigma": "σ", "tau": "τ", "upsilon": "υ", "phi": "φ",
+    "chi": "χ", "psi": "ψ", "omega": "ω",
+    "Alpha": "Α", "Beta": "Β", "Gamma": "Γ", "Delta": "Δ",
+    "Omega": "Ω", "Sigma": "Σ", "Pi": "Π", "Lambda": "Λ",
+}
+
+def clean_latex(text):
+    """清理标题中的 LaTeX 数学标记，返回可读纯文本。"""
+    import re
+    if not text:
+        return text
+    t = text
+
+    # 1. 先处理 $...$（可能嵌套，从内到外）
+    for _ in range(3):
+        t = re.sub(r"\$([^$]+)\$", lambda m: clean_latex(m.group(1)), t)
+
+    # 2. \textit{...} \textbf{...} \textrm{...} \emph{...} → 只保留内容
+    t = re.sub(r"\\(?:textit|textbf|textrm|emph)\{([^}]*)\}", r"\1", t)
+
+    # 3. 希腊字母 \beta \alpha 等 → Unicode
+    for cmd, uni in _LATEX_GREEK.items():
+        t = t.replace(f"\\{cmd}", uni)
+        # 也处理 {\beta} 形式
+        t = t.replace(f"{{{uni}}}", uni)
+
+    # 4. 下标 _{xx} 或 _x → 下标括号表示 (如 Ga₂O₃)
+    def sub_repl(m):
+        content = m.group(1) or m.group(2) or ""
+        return "₍" + content + "₎"
+    t = re.sub(r"_(?:\{([^}]*)\}|(\w))", sub_repl, t)
+
+    # 5. 上标 ^{xx} 或 ^x
+    def sup_repl(m):
+        content = m.group(1) or m.group(2) or ""
+        return "⁽" + content + "⁾"
+    t = re.sub(r"\^(?:\{([^}]*)\}|(\w))", sup_repl, t)
+
+    # 6. 清理剩余的孤立的 { } （LaTeX 分组符）
+    t = re.sub(r"\{([^{}]*)\}", r"\1", t)
+
+    # 7. 清理常见 LaTeX 命令残留
+    t = re.sub(r"\\(rm|sf|it|bf|cal|mathrm|mathbb|mathbf|mathit|sim|ldots|cdots|times|div|pm|mp|leq|geq|neq|approx|equiv|infty|partial|nabla|forall|exists|rightarrow|leftarrow|Rightarrow|Leftarrow|leftrightarrow|to|Rightarrow|Leftarrow|mid|quad|qquad|hspace|vspace|noindent)", "", t)
+
+    # 8. 收尾：去掉多余空白
+    t = re.sub(r"\s+", " ", t).strip()
+
+    return t
+
+
 def load_journals(path=None):
     cfg_path = Path(path) if path else JOURNALS_CONFIG
     if not cfg_path.exists():
@@ -153,6 +210,7 @@ def parse_feed(xml_text, journal_name):
 
     for it in items:
         title = _find_text(it, ["title"])
+        title = clean_latex(title)  # 清理 arXiv 等源标题中的 LaTeX 标记
         link = _find_link(it)
         pub_raw = _find_text(it, ["pubDate", "published", "updated", "date", "dc:date"])
         summary = _find_text(it, ["description", "summary", "content", "content:encoded", "encoded"])
