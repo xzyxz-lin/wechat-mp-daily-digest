@@ -215,6 +215,7 @@ def json_response(handler: BaseHTTPRequestHandler, payload, status: int = 200) -
     handler.send_header("Content-Type", "application/json; charset=utf-8")
     handler.send_header("Content-Length", str(len(body)))
     handler.send_header("Cache-Control", "no-store")
+    handler.send_header("Access-Control-Allow-Origin", "*")
     handler.end_headers()
     handler.wfile.write(body)
 
@@ -235,6 +236,7 @@ def static_response(handler: BaseHTTPRequestHandler, filename: str) -> None:
     handler.send_response(200)
     handler.send_header("Content-Type", content_type)
     handler.send_header("Content-Length", str(len(body)))
+    handler.send_header("Access-Control-Allow-Origin", "*")
     handler.end_headers()
     handler.wfile.write(body)
 
@@ -245,6 +247,15 @@ class Handler(BaseHTTPRequestHandler):
 
     def _send_error(self, status, message):
         json_response(self, {"error": message}, status)
+
+    def do_OPTIONS(self):
+        # 允许跨域预检（file:// 双击打开 html 时需要）
+        self.send_response(204)
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.send_header("Access-Control-Max-Age", "86400")
+        self.end_headers()
 
     def do_GET(self):
         parsed = urlparse(self.path)

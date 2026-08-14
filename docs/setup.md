@@ -110,6 +110,14 @@ python daily.py
 
 ## 八、故障排查
 
+### Docker 开机自动启动（已禁用）
+
+Docker Desktop **不会**开机自启。如需使用：
+- 双击桌面「公众号论文观察台」快捷方式，脚本会自动启动 Docker
+- 或直接双击桌面 Docker 快捷方式手动打开
+
+> 详见 [Docker 自启动问题排查与修复记录](docker-troubleshooting.md)。
+
 ### WeWe RSS 启动失败
 
 - 检查端口 4000 是否被占用

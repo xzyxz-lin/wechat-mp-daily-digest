@@ -32,8 +32,14 @@
   const toast = $("#toast");
 
   // ===== 工具函数 =====
+  // 兼容直接以 file:// 双击打开 html：自动切到 http 后端地址
+  const API_BASE = (location.protocol === "file:") ? "http://127.0.0.1:8032" : "";
+  function absUrl(u) {
+    return (typeof u === "string" && u.startsWith("/")) ? API_BASE + u : u;
+  }
+
   async function fetchJSON(url, options) {
-    const resp = await fetch(url, options);
+    const resp = await fetch(absUrl(url), options);
     if (!resp.ok) {
       const body = await resp.text().catch(() => "");
       throw new Error(`HTTP ${resp.status} ${body}`);

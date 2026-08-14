@@ -74,12 +74,19 @@ if (-not $weweName) {
     }
 }
 
-# ---- Step 3: Web backend ----
+# ---- Step 3: Web backend (重启以确保使用最新代码) ----
+if (-not (Test-Path -LiteralPath $venvPython)) {
+    Write-Host "python venv missing: $venvPython"
+    exit 1
+}
+# 若端口已被旧进程占用，先释放，避免用到旧代码（8032 专用于观察台）
+$occupied = Get-NetTCPConnection -LocalPort $Port -ErrorAction SilentlyContinue
+if ($occupied) {
+    $oldPid = $occupied.OwningProcess | Select-Object -First 1
+    try { Stop-Process -Id $oldPid -Force -ErrorAction SilentlyContinue } catch {}
+    Start-Sleep -Seconds 1
+}
 if (-not (Test-PaperObservatoryReady -Url $siteUrl)) {
-    if (-not (Test-Path -LiteralPath $venvPython)) {
-        Write-Host "python venv missing: $venvPython"
-        exit 1
-    }
     Write-Host 'Starting Paper Observatory backend...'
     Start-Process -FilePath $venvPython -ArgumentList @($serverScript, '--host', '0.0.0.0', '--port', [string]$Port) -WindowStyle Hidden | Out-Null
     $ok = $false
