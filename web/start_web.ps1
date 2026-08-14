@@ -93,10 +93,13 @@ if (-not (Test-PaperObservatoryReady -Url $siteUrl)) {
     }
 }
 
-# ---- Step 4: open browser ----
+# ---- Step 4: open browser (WeWe RSS dash + Paper Observatory) ----
+$weweDash = 'http://localhost:4000/dash'
 Write-Host "Ready: $siteUrl"
+Write-Host "WeWe RSS: $weweDash"
 if (-not $NoBrowser) {
+    Start-Process explorer.exe -ArgumentList $weweDash | Out-Null
     Start-Process explorer.exe -ArgumentList $siteUrl | Out-Null
-    Write-Host 'Browser launched. This window will close in 3 seconds...'
+    Write-Host 'Two tabs opened: WeWe RSS (for scan/enable) + Paper Observatory. Close in 3s...'
     Start-Sleep -Seconds 3
 }
