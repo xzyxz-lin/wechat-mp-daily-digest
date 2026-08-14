@@ -122,6 +122,47 @@
           </div>
         </div>
         <div class="fund-list" id="fund-list"></div>
+
+        <!-- 获批/资助项目查询（需手动验证码） -->
+        <div class="support-query" id="support-query">
+          <div class="section-heading"><div><span>SUPPORT QUERY</span><h3>获批 / 资助项目查询</h3></div><p>查询国家自然科学基金获批/资助项目（需输入图形验证码）。</p></div>
+          <div class="support-form" id="support-form">
+            <div class="support-captcha-row">
+              <div class="captcha-box" id="captcha-box">
+                <img id="captcha-img" src="" alt="验证码" />
+                <button type="button" id="captcha-refresh" title="刷新验证码">↻</button>
+                <p class="captcha-hint" id="captcha-hint">点击「刷新验证码」获取</p>
+              </div>
+              <input type="text" id="captcha-input" placeholder="输入图中验证码" maxlength="6" autocomplete="off" aria-label="验证码" />
+            </div>
+            <div class="support-fields">
+              <input type="text" id="sq-keyword" placeholder="关键词（如：膜、反渗透）" value="膜" />
+              <input type="text" id="sq-person" placeholder="负责人（可选）" />
+              <input type="text" id="sq-unit" placeholder="依托单位（可选）" />
+              <div class="sq-year-range">
+                <input type="number" id="sq-year-start" placeholder="起始年" value="2020" min="1986" max="2030" />
+                <span>—</span>
+                <input type="number" id="sq-year-end" placeholder="截止年" value="2025" min="1986" max="2030" />
+              </div>
+            </div>
+            <div class="support-actions">
+              <button type="button" id="sq-submit" class="btn-primary">查询</button>
+              <span id="sq-status" class="sq-status"></span>
+            </div>
+          </div>
+          <div class="support-results" id="support-results" hidden>
+            <div class="support-results-header">
+              <span id="support-count"></span>
+              <button type="button" id="support-export" class="btn-secondary">导出结果</button>
+            </div>
+            <table class="support-table" id="support-table">
+              <thead><tr><th>项目名称</th><th>负责人</th><th>依托单位</th><th>金额(万)</th><th>批准年度</th><th>类型</th></tr></thead>
+              <tbody id="support-tbody"></tbody>
+            </table>
+          </div>
+          <div class="support-error" id="support-error" hidden></div>
+          <p class="support-note">数据来源：<a href="http://output.nsfc.gov.cn/projectQuery" target="_blank" rel="noopener">output.nsfc.gov.cn（国家自然科学基金）</a> · 验证码由国自然官方生成，本站仅代理转发</p>
+        </div>
       </section>
     </main>
   </div>

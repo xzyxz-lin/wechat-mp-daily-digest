@@ -314,6 +314,36 @@ svg { width: 1.25rem; height: 1.25rem; fill: none; stroke: currentColor; stroke-
 #fund-paper-list .ptitle { display: block; font-size: .9rem; color: var(--ink-950); line-height: 1.4; }
 #fund-paper-list .pauthors { display: block; margin-top: 3px; font-size: .76rem; color: var(--ink-700); }
 
+/* ===== 获批/资助查询（验证码） ===== */
+.support-query { margin-top: 36px; max-width: 960px; }
+.support-form { background: var(--white); border: 1px solid var(--paper-200); border-radius: 4px; padding: 24px; }
+.support-captcha-row { display: flex; align-items: center; gap: 16px; margin-bottom: 18px; }
+.captcha-box { position: relative; width: 150px; height: 52px; border: 1px solid var(--paper-300); border-radius: 4px; overflow: hidden; background: #fafafa; flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
+.captcha-box img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.captcha-box button { position: absolute; top: 2px; right: 2px; background: rgba(255,255,255,.85); border: 1px solid var(--paper-300); border-radius: 3px; padding: 2px 6px; font-size: .75rem; cursor: pointer; opacity: 0; transition: opacity .15s; }
+.captcha-box:hover button { opacity: 1; }
+.captcha-hint { position: absolute; font-size: .72rem; color: var(--ink-700); pointer-events: none; }
+#captcha-input { width: 140px; padding: 10px 12px; border: 1px solid var(--paper-300); border-radius: 4px; font-size: .95rem; letter-spacing: 3px; text-transform: uppercase; text-align: center; }
+.support-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 16px; }
+.support-fields input { padding: 9px 12px; border: 1px solid var(--paper-300); border-radius: 4px; font-size: .85rem; }
+.sq-year-range { display: flex; align-items: center; gap: 8px; grid-column: span 2; }
+.sq-year-range input { width: 100px; }
+.support-actions { display: flex; align-items: center; gap: 14px; }
+.btn-primary { padding: 9px 28px; background: var(--oxide-700); color: #fff; border: none; border-radius: 4px; font-size: .88rem; font-weight: 600; cursor: pointer; transition: background .15s; }
+.btn-primary:hover { background: var(--oxide-800); }
+.btn-primary:disabled { opacity: .5; cursor: not-allowed; }
+.btn-secondary { padding: 6px 16px; background: transparent; color: var(--oxide-700); border: 1px solid var(--oxide-600); border-radius: 4px; font-size: .8rem; cursor: pointer; }
+.sq-status { font-size: .82rem; color: var(--ink-700); }
+.support-results { margin-top: 18px; background: var(--white); border: 1px solid var(--paper-200); border-radius: 4px; overflow: hidden; }
+.support-results-header { display: flex; justify-content: space-between; align-items: center; padding: 12px 18px; background: var(--paper-50); border-bottom: 1px solid var(--paper-200); font-size: .84rem; }
+.support-table { width: 100%; border-collapse: collapse; font-size: .82rem; }
+.support-table th { background: var(--paper-100); padding: 10px 14px; text-align: left; font-weight: 600; color: var(--ink-900); white-space: nowrap; border-bottom: 1px solid var(--paper-200); }
+.support-table td { padding: 10px 14px; border-bottom: 1px solid var(--paper-100); vertical-align: top; line-height: 1.45; }
+.support-table tbody tr:hover { background: var(--paper-50); }
+.support-error { margin-top: 12px; padding: 12px 16px; background: #fef2f2; border: 1px solid #fecaca; border-radius: 4px; color: #b91c1c; font-size: .84rem; }
+.support-note { margin-top: 12px; font-size: .74rem; color: var(--ink-700); }
+.support-note a { color: var(--oxide-700); }
+
 @media (max-width: 900px) {
   .atlas-hero { grid-template-columns: 1fr; }
   .topology { border-left: 0; padding-left: 0; }

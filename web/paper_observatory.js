@@ -541,6 +541,116 @@
 
   // 进入基金视图时加载列表（防抖避免重复请求）
 
+  // ===== 获批/资助查询（验证码） =====
+  const captchaImg = $("#captcha-img");
+  const captchaRefresh = $("#captcha-refresh");
+  const captchaInput = $("#captcha-input");
+  const captchaHint = $("#captcha-hint");
+  const sqSubmit = $("#sq-submit");
+  const sqStatus = $("#sq-status");
+  const sqResults = $("#support-results");
+  const sqError = $("#support-error");
+  const sqTbody = $("#support-tbody");
+  const sqCount = $("#support-count");
+
+  async function loadCaptcha() {
+    captchaHint.textContent = "加载中...";
+    captchaImg.src = "";
+    try {
+      const r = await fetch("/api/funds/captcha");
+      const d = await r.json();
+      if (d.ok && d.image) {
+        captchaImg.src = `data:${d.content_type || "image/png"};base64,${d.image}`;
+        captchaHint.textContent = "";
+        captchaInput.focus();
+      } else {
+        captchaHint.textContent = d.error || "获取失败";
+      }
+    } catch (e) {
+      captchaHint.textContent = "网络错误：" + e.message;
+    }
+  }
+
+  captchaRefresh.addEventListener("click", loadCaptcha);
+  captchaImg.addEventListener("click", loadCaptcha);
+
+  async function submitSupportQuery() {
+    const code = captchaInput.value.trim();
+    if (!code) { showToast("请输入验证码"); return; }
+
+    sqSubmit.disabled = true;
+    sqStatus.textContent = "查询中...";
+    sqError.hidden = true;
+    sqResults.hidden = true;
+
+    try {
+      const r = await fetch("/api/funds/support-query", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          captcha: code,
+          keyword: $("#sq-keyword").value.trim(),
+          person: $("#sq-person").value.trim(),
+          unit: $("#sq-unit").value.trim(),
+          year_start: $("#sq-year-start").value || "2020",
+          year_end: $("#sq-year-end").value || "2025",
+        }),
+      });
+      const d = await r.json();
+      if (!d.ok) {
+        sqStatus.textContent = "";
+        sqError.textContent = d.error || "查询失败";
+        sqError.hidden = false;
+        loadCaptcha(); // 刷新验证码
+      } else {
+        sqStatus.textContent = "";
+        sqError.hidden = true;
+        renderSupportResults(d.results);
+        sqResults.hidden = false;
+      }
+    } catch (e) {
+      sqStatus.textContent = "";
+      sqError.textContent = "网络错误：" + e.message;
+      sqError.hidden = false;
+    } finally {
+      sqSubmit.disabled = false;
+    }
+  }
+
+  function renderSupportResults(results) {
+    sqCount.textContent = `共 ${results.length} 条结果`;
+    if (results.length === 0) {
+      sqTbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:var(--ink-700);padding:20px;">未找到匹配项目，试试换关键词</td></tr>`;
+      return;
+    }
+    sqTbody.innerHTML = results.map(r => `<tr>
+      <td>${escapeHtml(r.project_name)}</td>
+      <td>${escapeHtml(r.admin)}</td>
+      <td>${escapeHtml(r.unit)}</td>
+      <td>${escapeHtml(r.amount)}</td>
+      <td>${escapeHtml(r.year)}</td>
+      <td>${escapeHtml(r.type)}</td>
+    </tr>`).join("");
+  }
+
+  sqSubmit.addEventListener("click", submitSupportQuery);
+  captchaInput.addEventListener("keydown", (e) => { if (e.key === "Enter") submitSupportQuery(); });
+  // 导出按钮
+  $("#support-export").addEventListener("click", () => {
+    const rows = Array.from(sqTbody.querySelectorAll("tr")).map(tr =>
+      Array.from(tr.querySelectorAll("td")).map(td => td.textContent).join("\t")
+    ).join("\n");
+    const header = "项目名称\t负责人\t依托单位\t金额(万)\t批准年度\t类型\n";
+    const blob = new Blob([header + rows], { type: "text/plain;charset=utf-8" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `NSFC_获批项目_${new Date().toISOString().slice(0,10)}.tsv`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  });
+
+  // ===== /获批查询结束 =====
+
   // ===== 现场抓取 =====
   async function triggerFetch() {
     if (fetchButton.disabled) return;

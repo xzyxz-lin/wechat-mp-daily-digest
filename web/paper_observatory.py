@@ -24,6 +24,8 @@ import argparse
 import json
 import subprocess
 import threading
+import urllib.request
+import ssl
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -249,6 +251,171 @@ def load_funds(q: str | None = None, kw: str | None = None, cat: str | None = No
     }
 
 
+# ===== NSFC 获批/资助查询代理（需验证码，用户手动输入）=====
+
+_NSFC_BASE = "http://output.nsfc.gov.cn"
+_NSFC_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                  "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+}
+_SSL_CTX = ssl.create_default_context()
+_SSL_CTX.check_hostname = False
+_SSL_CTX.verify_mode = ssl.CERT_NONE
+
+
+def _nsfc_get(url: str) -> tuple[int, bytes, dict]:
+    """GET 请求 NSFC 门户，返回 (status, body, response_headers)。"""
+    req = urllib.request.Request(url, headers=_NSFC_HEADERS)
+    try:
+        with urllib.request.urlopen(req, timeout=20, context=_SSL_CTX) as r:
+            return r.status, r.read(), dict(r.getheaders())
+    except urllib.error.HTTPError as e:
+        return e.code, e.read() or b"", {}
+    except Exception as e:
+        return 0, str(e).encode("utf-8"), {}
+
+
+def _nsfc_post(url: str, data: bytes, extra_headers: dict | None = None) -> tuple[int, bytes, dict]:
+    """POST 请求 NSFC 门户。"""
+    h = dict(_NSFC_HEADERS)
+    h["Content-Type"] = "application/x-www-form-urlencoded"
+    if extra_headers:
+        h.update(extra_headers)
+    req = urllib.request.Request(url, data=data, headers=h, method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=20, context=_SSL_CTX) as r:
+            return r.status, r.read(), dict(r.getheaders())
+    except urllib.error.HTTPError as e:
+        return e.code, e.read() or b"", {}
+    except Exception as e:
+        return 0, str(e).encode("utf-8"), {}
+
+
+def nsfc_captcha() -> dict:
+    """获取国自然验证码图片（代理 output.nsfc.gov.cn）。
+
+    返回 {"ok": bool, "image": base64|None, "cookies": dict, "error": str|None}
+    """
+    # 尝试多个可能的验证码 URL
+    captcha_urls = [
+        f"{_NSFC_BASE}/validateCode.jsp",
+        f"{_NSFC_BASE}/validateCode",
+        f"{_NSFC_BASE}/code.jsp",
+    ]
+    for url in captcha_urls:
+        status, body, headers = _nsfc_get(url)
+        ct = headers.get("Content-Type", "")
+        if status == 200 and len(body) > 100 and ("image" in ct or not body.startswith(b"{")):
+            import base64
+            return {
+                "ok": True,
+                "image": base64.b64encode(body).decode("ascii"),
+                "content_type": ct or "image/png",
+                "url_used": url,
+                "error": None,
+            }
+    # 如果都失败，返回错误信息
+    return {"ok": False, "image": None, "error": f"无法获取验证码（HTTP {status}），请确认网络可访问 output.nsfc.gov.cn"}
+
+
+def nsfc_support_query(params: dict) -> dict:
+    """提交获批/资助项目查询（带验证码）。
+
+    params: {captcha: str, keyword: str, year_start: str, year_end: str,
+             person: str, unit: str, code: str, project_no: str}
+    """
+    import re
+    from html.parser import HTMLParser
+
+    captcha = params.get("captcha", "").strip()
+    if not captcha:
+        return {"ok": False, "results": [], "total": 0, "error": "请输入验证码"}
+
+    # 构造查询参数（基于 output.nsfc.gov.cn projectQuery 表单字段）
+    form_data = urllib.parse.urlencode({
+        "keyword": params.get("keyword", ""),
+        "personName": params.get("person", ""),
+        "orgName": params.get("unit", ""),
+        "projectNo": params.get("project_no", ""),
+        "applyCode": params.get("code", ""),
+        "startTime": params.get("year_start", "2020"),
+        "endTime": params.get("year_end", "2025"),
+        "validateCode": captcha,
+        "resultNum": "50",
+    }).encode()
+
+    status, body, headers = _nsfc_post(f"{_NSFC_BASE}/projectQuery", form_data)
+
+    if status != 200:
+        return {"ok": False, "results": [], "total": 0, "error": f"查询请求失败（HTTP {status}）"}
+
+    html = body.decode("utf-8", errors="ignore")
+
+    # 检查是否提示验证码错误
+    if "验证码" in html and ("错误" in html or "不正确" in html or "失效" in html):
+        return {"ok": False, "results": [], "total": 0, "error": "验证码错误或已过期，请刷新重试"}
+
+    # 解析结果表格
+    results = _parse_nsfc_results(html)
+    return {
+        "ok": True,
+        "results": results,
+        "total": len(results),
+        "raw_html_len": len(html),
+        "error": None,
+    }
+
+
+def _parse_nsfc_results(html: str) -> list[dict]:
+    """从 NSFC projectQuery 结果页面提取项目列表。"""
+    import re
+
+    results = []
+    # 策略1：找包含"负责人"的表格数据行
+    # NSFC 结果通常在 table 里，每行是一个项目
+    tables = re.findall(r"<table[^>]*>(.*?)</table>", html, re.S | re.I)
+
+    for table in tables:
+        if "负责人" not in table and "依托单位" not in table:
+            continue
+        # 提取所有行
+        rows = re.findall(r"<tr[^>]*>(.*?)</tr>", table, re.S | re.I)
+        for row in rows:
+            cells = re.findall(r"<td[^>]*>(.*?)</td>", row, re.S | re.I)
+            clean = lambda s: re.sub(r"<[^>]+>", "", s).strip()
+            cells = [clean(c) for c in cells]
+            # 有效数据行：至少有 3 个单元格且包含中文内容
+            if len(cells) >= 4 and any(re.search(r"[\u4e00-\u9fff]", c) for c in cells[:4]):
+                item = {
+                    "project_name": cells[0] if len(cells) > 0 else "",
+                    "admin": cells[1] if len(cells) > 1 else "",
+                    "unit": cells[2] if len(cells) > 2 else "",
+                    "amount": cells[3] if len(cells) > 3 else "",
+                    "year": cells[4] if len(cells) > 4 else "",
+                    "type": cells[5] if len(cells) > 5 else "",
+                    "code": cells[6] if len(cells) > 6 else "",
+                    "no": cells[7] if len(cells) > 7 else "",
+                }
+                # 只保留看起来像真实数据的行（项目名长度合理）
+                if len(item["project_name"]) >= 4:
+                    results.append(item)
+
+    # 去重（按项目名）
+    seen = set()
+    unique = []
+    for r in results:
+        key = r["project_name"]
+        if key not in seen:
+            seen.add(key)
+            unique.append(r)
+    return unique
+
+
+# ===== /NSFC 代理结束 =====
+
+
 def fetch_dates(account: str | None = None) -> list[dict]:
     """返回按日期分组的文章数（供历史浏览）。"""
     archive = scan_archive()
@@ -407,6 +574,10 @@ class Handler(BaseHTTPRequestHandler):
                 kw = (qs.get("kw") or [None])[0]
                 cat = (qs.get("cat") or [None])[0]
                 json_response(self, load_funds(q, kw, cat))
+            elif path == "/api/funds/captcha":
+                # 代理获取国自然验证码图片
+                result = nsfc_captcha()
+                json_response(self, result)
             elif path == "/api/fetch/status":
                 json_response(self, FETCH_STATE)
             else:
@@ -438,6 +609,16 @@ class Handler(BaseHTTPRequestHandler):
                 return
             start_fetch(start_date=start_date, end_date=end_date)
             json_response(self, {"started": True, "message": f"自定义抓取已启动（{start_date} ~ {end_date}）"})
+        elif path == "/api/funds/support-query":
+            # 获批/资助项目查询（带验证码）
+            length = int(self.headers.get("Content-Length") or 0)
+            body = self.rfile.read(length).decode("utf-8") if length > 0 else "{}"
+            try:
+                params = json.loads(body)
+            except Exception:
+                params = {}
+            result = nsfc_support_query(params)
+            json_response(self, result)
         else:
             self._send_error(404, "Not Found")
 
