@@ -103,10 +103,14 @@ def get_account(item):
     return ""
 
 
-def normalize_item(item):
-    """标准化文章字段供 render/send 使用。"""
+def normalize_item(item, category="公众号"):
+    """标准化文章字段供 render/send 使用。
+
+    category: 来源分类，公众号来源为「公众号」，期刊来源为「期刊」。
+    """
     return {
         "account": get_account(item),
+        "category": category,
         "title": item.get("title", "(无标题)"),
         "url": item.get("url", ""),
         "image": item.get("image", ""),
@@ -117,10 +121,18 @@ def normalize_item(item):
 
 
 def fetch_daily(config, target_date=None):
-    """主入口：拉取并过滤指定日期的文章（按公众号白名单可选过滤）。"""
+    """主入口：拉取并过滤指定日期的文章（按公众号白名单可选过滤）。
+
+    返回的文章均带 category 字段（此处来源为公众号，标记为「公众号」）。
+    """
     target_date = target_date or date.today()
     wr_cfg = config["wewe_rss"]
-    whitelist = [f["name"] for f in wr_cfg.get("feeds", []) if f.get("name")]
+    # 白名单 -> 分类 映射（公众号来源默认「公众号」，可由 config 的 category 覆盖）
+    whitelist_map = {
+        f["name"]: f.get("category", "公众号")
+        for f in wr_cfg.get("feeds", []) if f.get("name")
+    }
+    whitelist = list(whitelist_map.keys())
 
     print(f"[fetch] 调用 {wr_cfg['base_url']}/feeds/all.json ...")
     data = fetch_all(wr_cfg["base_url"], wr_cfg.get("auth_code"))
@@ -134,7 +146,7 @@ def fetch_daily(config, target_date=None):
         filtered = [it for it in filtered if get_account(it) in whitelist]
         print(f"[fetch] 公众号白名单过滤后: {len(filtered)} 篇 (白名单: {whitelist})")
 
-    return [normalize_item(it) for it in filtered]
+    return [normalize_item(it, whitelist_map.get(get_account(it), "公众号")) for it in filtered]
 
 
 if __name__ == "__main__":

@@ -235,6 +235,56 @@ svg { width: 1.25rem; height: 1.25rem; fill: none; stroke: currentColor; stroke-
 .account-card.is-empty { opacity: .78; border-style: dashed; background: rgba(255,255,255,.4); }
 .account-card.is-empty:hover { opacity: 1; }
 
+/* ===== 导航分组（可折叠） ===== */
+.nav-group { display: grid; gap: 2px; margin: 2px 0; }
+.nav-group__header { width: 100%; }
+.nav-group__header .nav-group__chevron { margin-left: auto; width: 16px; height: 16px; transition: transform .2s ease; color: var(--paper-300); }
+.nav-group.is-collapsed .nav-group__chevron { transform: rotate(90deg); }
+.nav-group__children { display: grid; gap: 2px; padding-left: 14px; margin-left: 12px; border-left: 1px solid rgba(255,255,255,.12); overflow: hidden; }
+.nav-group.is-collapsed .nav-group__children { display: none; }
+.nav-sub { min-height: 42px; padding-left: 20px; }
+.nav-sub span { font-weight: 500; font-size: .82rem; }
+.nav-sub.is-active { color: white; background: rgba(42,109,103,.32); border-color: rgba(95,147,141,.4); }
+
+/* ===== 文件总控卡片 ===== */
+.dashboard-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 20px; }
+.dashboard-card { display: flex; flex-direction: column; min-height: 200px; padding: 22px 22px 20px; background: var(--white); border: 1px solid var(--paper-300); border-radius: 3px; transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease; }
+.dashboard-card:hover { transform: translateY(-3px); box-shadow: var(--shadow); border-color: var(--oxide-400); }
+.dashboard-card__head { display: flex; align-items: center; gap: 9px; margin-bottom: 14px; }
+.dashboard-card__head svg { width: 18px; height: 18px; color: var(--oxide-600); }
+.dashboard-card__head span { color: var(--oxide-700); font: 600 .66rem var(--font-data); letter-spacing: .12em; text-transform: uppercase; }
+.dashboard-card h4 { margin: 0 0 16px; font: 520 1.3rem/1.2 var(--font-display); }
+.dashboard-card__stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; padding: 14px 0; border-top: 1px solid var(--paper-200); border-bottom: 1px solid var(--paper-200); margin-bottom: 14px; }
+.dashboard-card__stats div { display: grid; }
+.dashboard-card__stats span { color: var(--ink-700); font-size: .64rem; }
+.dashboard-card__stats strong { font: 600 1.05rem var(--font-data); font-variant-numeric: tabular-nums; }
+.dashboard-card__desc { margin: 0; color: var(--ink-700); font-size: .78rem; line-height: 1.55; }
+.dashboard-card.is-fund { border-style: dashed; background: rgba(255,255,255,.45); }
+.dashboard-card.is-fund .dashboard-card__head svg { color: var(--amber-500); }
+.dashboard-card.is-fund .dashboard-card__head span { color: var(--amber-500); }
+
+/* ===== 聚合筛选 chips ===== */
+.filter-chips { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 26px; }
+.chip { display: inline-flex; align-items: center; min-height: 38px; padding: 0 16px; color: var(--ink-700); background: rgba(255,255,255,.5); border: 1px solid var(--paper-300); border-radius: 999px; font-size: .78rem; font-weight: 600; transition: background .16s ease, color .16s ease, border-color .16s ease; }
+.chip:hover { border-color: var(--oxide-600); color: var(--oxide-700); }
+.chip.is-active { color: white; background: var(--oxide-700); border-color: var(--oxide-700); }
+
+/* ===== 分类徽章 ===== */
+.cat-badge { flex: none; align-self: center; padding: 3px 9px; font: 600 .64rem var(--font-data); letter-spacing: .04em; border-radius: 999px; border: 1px solid transparent; }
+.cat-badge.is-mp { color: var(--oxide-700); background: rgba(31,91,87,.1); border-color: rgba(31,91,87,.25); }
+.cat-badge.is-journal { color: var(--copper-600); background: rgba(195,102,62,.12); border-color: rgba(195,102,62,.3); }
+.cat-badge.is-fund { color: var(--amber-500); background: rgba(213,146,61,.12); border-color: rgba(213,146,61,.3); }
+
+/* ===== 基金占位 ===== */
+.fund-placeholder { max-width: 680px; margin: 40px auto; padding: 40px; text-align: center; background: var(--white); border: 1px dashed var(--paper-300); border-radius: 4px; }
+.fund-placeholder__icon { width: 46px; height: 46px; color: var(--amber-500); }
+.fund-placeholder h3 { margin: 18px 0 14px; font: 520 1.5rem/1.2 var(--font-display); }
+.fund-placeholder p { margin: 0 0 8px; color: var(--ink-700); font-size: .9rem; }
+.fund-placeholder ul { display: grid; gap: 10px; margin: 18px 0; padding: 0; list-style: none; text-align: left; }
+.fund-placeholder li { padding: 12px 16px; background: var(--paper-100); border-left: 3px solid var(--amber-500); border-radius: 2px; font-size: .85rem; color: var(--ink-800); }
+.fund-placeholder li b { color: var(--ink-950); }
+.fund-placeholder__hint { margin-top: 16px; color: var(--ink-700); font-size: .76rem; }
+
 @media (max-width: 900px) {
   .atlas-hero { grid-template-columns: 1fr; }
   .topology { border-left: 0; padding-left: 0; }

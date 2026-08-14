@@ -85,7 +85,7 @@ HKCU\Software\Microsoft\Windows\CurrentVersion\Run
 
 Docker 不再开机自启。需要使用时：
 
-1. **日常使用**：双击桌面「公众号论文观察台」→ `start_web.ps1` 自动完成：
+1. **日常使用**：双击桌面「论文观察台」→ `start_web.ps1` 自动完成：
    - 启动 Docker Desktop（如未运行）
    - 启动 WeWe RSS 容器（如未运行）
    - 启动 Web 后端（8032）

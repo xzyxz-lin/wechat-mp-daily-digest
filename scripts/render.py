@@ -122,7 +122,7 @@ def render_html(articles, target_date_str, group_by_account=True, sort_desc=True
     groups = group_articles(articles, group_by_account, sort_desc)
     tpl = Template(HTML_TEMPLATE)
     return tpl.render(
-        title=f"公众号每日论文推送 - {target_date_str}",
+        title=f"每日论文推送 - {target_date_str}",
         groups=groups,
         toc=include_toc,
     )
@@ -131,7 +131,7 @@ def render_html(articles, target_date_str, group_by_account=True, sort_desc=True
 def render_markdown(articles, target_date_str, group_by_account=True, sort_desc=True):
     """渲染 Markdown 字符串。"""
     lines = []
-    lines.append(f"# 公众号每日论文推送 - {target_date_str}\n\n")
+    lines.append(f"# 每日论文推送 - {target_date_str}\n\n")
     lines.append(f"共 **{len(articles)}** 篇文章。\n\n---\n\n")
 
     groups = group_articles(articles, group_by_account, sort_desc)

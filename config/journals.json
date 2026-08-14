@@ -1,0 +1,97 @@
+{
+  "category": "期刊",
+  "note": "期刊论文 RSS 源清单。通过 scripts/fetch_journals.py 直连抓取，写入与公众号同一套本地存档（articles.json），每篇打 category=期刊。",
+  "proxy": null,
+  "journals": [
+    {
+      "name": "Journal of Membrane Science",
+      "rss": "https://www.sciencedirect.com/journal/journal-of-membrane-science/rss",
+      "publisher": "ScienceDirect",
+      "note": "本机网络被出版商拦截(403)，需在可访问网络/配置 proxy 后自动解锁"
+    },
+    {
+      "name": "Water Research",
+      "rss": "https://www.sciencedirect.com/journal/water-research/rss",
+      "publisher": "ScienceDirect",
+      "note": "本机网络被出版商拦截(403)"
+    },
+    {
+      "name": "Environmental Science & Technology",
+      "rss": "https://pubs.acs.org/journal/esthag/rss",
+      "publisher": "ACS",
+      "note": "本机网络被出版商拦截(000/超时)"
+    },
+    {
+      "name": "Nature Water",
+      "rss": "https://www.nature.com/subjects/water.rss",
+      "publisher": "Nature",
+      "note": "使用 Nature 水领域主题 RSS（ Nature Water 期刊独立 RSS 在本环境 404）"
+    },
+    {
+      "name": "Nature Communications",
+      "rss": "https://www.nature.com/ncomms.rss",
+      "publisher": "Nature",
+      "note": "稳定可抓"
+    },
+    {
+      "name": "Nature",
+      "rss": "https://www.nature.com/nature.rss",
+      "publisher": "Nature",
+      "note": "正刊 RSS（Atom 格式）"
+    },
+    {
+      "name": "Desalination",
+      "rss": "https://www.sciencedirect.com/journal/desalination/rss",
+      "publisher": "ScienceDirect",
+      "note": "本机网络被出版商拦截(403)"
+    },
+    {
+      "name": "Separation and Purification Technology",
+      "rss": "https://www.sciencedirect.com/journal/separation-and-purification-technology/rss",
+      "publisher": "ScienceDirect",
+      "note": "本机网络被出版商拦截(403)"
+    },
+    {
+      "name": "npj Clean Water",
+      "rss": "https://www.nature.com/njcleanwater.rss",
+      "publisher": "Nature",
+      "note": "期刊独立 RSS 在本环境 404，待核实正确地址"
+    },
+    {
+      "name": "ACS ES&T Water",
+      "rss": "https://pubs.acs.org/journal/estwcu/rss",
+      "publisher": "ACS",
+      "note": "本机网络被出版商拦截/地址待核实"
+    },
+    {
+      "name": "Journal of Water Process Engineering",
+      "rss": "https://www.sciencedirect.com/journal/journal-of-water-process-engineering/rss",
+      "publisher": "ScienceDirect",
+      "note": "本机网络被出版商拦截(403)"
+    },
+    {
+      "name": "Membranes",
+      "rss": "https://www.mdpi.com/journal/membranes/rss",
+      "publisher": "MDPI",
+      "note": "本机网络被出版商拦截(403)"
+    },
+    {
+      "name": "arXiv·膜与分离预印本",
+      "rss": "https://arxiv.org/rss/cond-mat.soft",
+      "publisher": "arXiv",
+      "note": "预印本，稳定可抓（软物质：膜/分离/流变）"
+    },
+    {
+      "name": "arXiv·物理化学预印本",
+      "rss": "https://arxiv.org/rss/physics.chem-ph",
+      "publisher": "arXiv",
+      "note": "预印本，稳定可抓（物理化学：界面/吸附/催化）"
+    },
+    {
+      "name": "arXiv·材料科学预印本",
+      "rss": "https://arxiv.org/rss/cond-mat.mtrl-sci",
+      "publisher": "arXiv",
+      "note": "预印本，稳定可抓（材料：膜材料/纳米）"
+    }
+  ]
+}

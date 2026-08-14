@@ -2,21 +2,25 @@
   "use strict";
 
   const state = {
-    currentAccount: null,   // null 表示总览页
+    view: "dashboard",        // dashboard | aggregate | account | fund
+    currentAccount: null,
+    currentCategory: "",       // 论文总控筛选："" | 公众号 | 期刊
     currentPage: 1,
+    aggPage: 1,
     pageSize: 10,
     totalPages: 1,
     accounts: [],
+    categories: {},
     fetchPolling: null,
   };
 
   const $ = (sel) => document.querySelector(sel);
   const navStack = $("#nav-stack");
-  const accountGrid = $("#account-grid");
   const metricStrip = $("#metric-strip");
   const topology = $("#topology");
+  const dashboardCards = $("#dashboard-cards");
+  const aggregateArticles = $("#aggregate-articles");
   const accountArticles = $("#account-articles");
-  const accountPagination = $("#account-pagination");
   const pageTitle = $("#page-title");
   const pageEyebrow = $("#page-eyebrow");
   const snapshotTime = $("#snapshot-time");
@@ -32,7 +36,6 @@
   const toast = $("#toast");
 
   // ===== 工具函数 =====
-  // 兼容直接以 file:// 双击打开 html：自动切到 http 后端地址
   const API_BASE = (location.protocol === "file:") ? "http://127.0.0.1:8032" : "";
   function absUrl(u) {
     return (typeof u === "string" && u.startsWith("/")) ? API_BASE + u : u;
@@ -55,31 +58,28 @@
     showToast._t = setTimeout(() => toast.classList.remove("is-show"), 3200);
   }
 
-  function formatTime(iso) {
-    if (!iso) return "";
-    try {
-      const d = new Date(iso.replace("Z", "+00:00"));
-      const hh = String(d.getHours()).padStart(2, "0");
-      const mm = String(d.getMinutes()).padStart(2, "0");
-      return `${hh}:${mm}`;
-    } catch (e) {
-      return "";
-    }
-  }
-
-  function formatDateLabel(dateStr) {
-    // 2026.8.13 -> 2026年8月13日
-    const p = dateStr.split(".");
-    if (p.length === 3) {
-      return `${p[0]}年${Number(p[1])}月${Number(p[2])}日`;
-    }
-    return dateStr;
-  }
-
   function escapeHtml(s) {
     return String(s == null ? "" : s)
       .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
       .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+  }
+
+  function formatTime(iso) {
+    if (!iso) return "";
+    try {
+      const d = new Date(iso.replace("Z", "+00:00"));
+      return String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
+    } catch (e) { return ""; }
+  }
+
+  function formatDateLabel(dateStr) {
+    const p = dateStr.split(".");
+    if (p.length === 3) return `${p[0]}年${Number(p[1])}月${Number(p[2])}日`;
+    return dateStr;
+  }
+
+  function catClass(cat) {
+    return cat === "期刊" ? "is-journal" : (cat === "基金" ? "is-fund" : "is-mp");
   }
 
   // ===== 健康检查 =====
@@ -98,11 +98,12 @@
   async function loadOverview() {
     try {
       const data = await fetchJSON("/api/overview");
-      state.accounts = data.accounts;
-      renderNav(data.accounts);
+      state.accounts = data.accounts || [];
+      state.categories = data.categories || {};
+      renderNav(state.accounts);
       renderMetrics(data);
-      renderTopology(data.accounts);
-      renderAccountGrid(data.accounts);
+      renderTopology(state.accounts);
+      renderDashboard(state.categories);
       snapshotTime.textContent = new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
     } catch (e) {
       showToast("加载总览失败：" + e.message, true);
@@ -110,44 +111,77 @@
   }
 
   function renderNav(accounts) {
-    const items = accounts.map((a, i) => `
-      <button class="nav-item" data-account="${escapeHtml(a.name)}" data-view="account">
-        <svg><use href="#i-paper"/></svg><span>${escapeHtml(a.name)}</span><b>${a.article_count}</b>
-      </button>`).join("");
+    const pub = accounts.filter((a) => a.category === "公众号");
+    const jour = accounts.filter((a) => a.category === "期刊");
+
+    const group = (label, cat, list) => `
+      <div class="nav-group" data-group="${cat}">
+        <button class="nav-item nav-group__header" data-group="${cat}" aria-expanded="true" type="button">
+          <svg><use href="#i-paper"/></svg><span>${escapeHtml(label)}</span><b>${list.length}</b>
+          <svg class="nav-group__chevron"><use href="#i-chevron"/></svg>
+        </button>
+        <div class="nav-group__children">
+          ${list.map((a) => `
+            <button class="nav-item nav-sub" data-account="${escapeHtml(a.name)}" data-view="account" type="button">
+              <svg><use href="#i-paper"/></svg><span>${escapeHtml(a.name)}</span><b>${a.article_count}</b>
+            </button>`).join("")}
+        </div>
+      </div>`;
+
     navStack.innerHTML = `
-      <button class="nav-item is-active" data-account="" data-view="overview">
-        <svg><use href="#i-grid"/></svg><span>全局总览</span><b>ALL</b>
-      </button>${items}`;
-    navStack.querySelectorAll(".nav-item").forEach((btn) => {
+      <button class="nav-item is-active" data-view="dashboard" type="button">
+        <svg><use href="#i-grid"/></svg><span>文件总控</span><b>HOME</b>
+      </button>
+      <button class="nav-item" data-view="aggregate" type="button">
+        <svg><use href="#i-search"/></svg><span>论文总控</span><b>ALL</b>
+      </button>
+      ${group("公众号", "公众号", pub)}
+      ${group("期刊", "期刊", jour)}
+      <button class="nav-item" data-view="fund" type="button">
+        <svg><use href="#i-fund"/></svg><span>基金</span><b>SOON</b>
+      </button>`;
+
+    navStack.querySelectorAll(".nav-group__header").forEach((h) => {
+      h.addEventListener("click", () => {
+        const g = h.closest(".nav-group");
+        const collapsed = g.classList.toggle("is-collapsed");
+        h.setAttribute("aria-expanded", String(!collapsed));
+      });
+    });
+    navStack.querySelectorAll("[data-view]").forEach((btn) => {
       btn.addEventListener("click", () => {
-        const account = btn.dataset.account;
-        if (account) openAccount(account); else showOverview();
+        if (btn.classList.contains("nav-group__header")) return;
+        const view = btn.dataset.view;
+        const acct = btn.dataset.account;
+        if (acct) openAccount(acct);
+        else showView(view);
       });
     });
   }
 
   function renderMetrics(data) {
-    const lastDate = data.accounts.length
-      ? (data.accounts.map((a) => a.last_date).filter(Boolean).sort().pop() || "—")
-      : "—";
+    const lastDate = (data.accounts || [])
+      .map((a) => a.last_date).filter(Boolean).sort().pop() || "—";
     metricStrip.innerHTML = `
-      <div class="metric-cell"><span>关注公众号</span><strong>${data.total_accounts}</strong></div>
-      <div class="metric-cell"><span>累计文章</span><strong>${data.total_articles}</strong></div>
+      <div class="metric-cell"><span>信息源</span><strong>${data.total_accounts}</strong></div>
+      <div class="metric-cell"><span>累计论文</span><strong>${data.total_articles}</strong></div>
       <div class="metric-cell"><span>归档天数</span><strong>${data.total_days}</strong></div>
       <div class="metric-cell is-alert"><span>最近归档</span><strong>${lastDate}</strong></div>`;
   }
 
   function renderTopology(accounts) {
+    const pub = accounts.filter((a) => a.category === "公众号").length;
+    const jour = accounts.filter((a) => a.category === "期刊").length;
     if (!accounts.length) {
       topology.innerHTML = '<div class="empty">暂无归档数据</div>';
       return;
     }
-    const top = accounts.slice(0, 8);
     const core = `
       <div class="topology-core">
-        <span>ACCOUNTS</span><strong>${accounts.length}</strong>
-        <small>公众号归档源</small>
+        <span>SOURCES</span><strong>${accounts.length}</strong>
+        <small>公众号 ${pub} · 期刊 ${jour}</small>
       </div>`;
+    const top = accounts.slice(0, 8);
     const nodes = top.map((a) => `
       <div class="topology-node">
         <div><strong>${escapeHtml(a.name)}</strong><span>${a.day_count} 天 · ${a.article_count} 篇</span></div>
@@ -156,104 +190,96 @@
     topology.innerHTML = core + nodes;
   }
 
-  function renderAccountGrid(accounts) {
-    if (!accounts.length) {
-      accountGrid.innerHTML = '<div class="empty">还没有归档数据，先点右上角「现场抓取」。</div>';
-      return;
-    }
-    accountGrid.innerHTML = accounts.map((a) => {
-      const isEmpty = a.article_count === 0;
-      const tag = isEmpty ? '<b>暂无</b>' : `${a.day_count} DAYS <b>·</b> ${a.last_date || "—"}`;
-      const emptyHint = isEmpty
-        ? '<p class="account-card__hint">点击进入后可点右上角「现场抓取」尝试</p>'
-        : "";
-      return `
-      <div class="account-card ${isEmpty ? "is-empty" : ""}" data-account="${escapeHtml(a.name)}">
-        <p class="account-card__code">${tag}</p>
-        <h4>${escapeHtml(a.name)}</h4>
-        ${emptyHint}
-        <div class="account-card__stats">
-          <div><span>累计文章</span><strong>${a.article_count}</strong></div>
-          <div class="is-alert"><span>归档天数</span><strong>${a.day_count}</strong></div>
+  function renderDashboard(categories) {
+    const pub = categories["公众号"] || { sources: 0, articles: 0, days: 0 };
+    const jour = categories["期刊"] || { sources: 0, articles: 0, days: 0 };
+    const card = (icon, title, sub, stat, desc, extraCls) => `
+      <div class="dashboard-card ${extraCls || ""}">
+        <div class="dashboard-card__head"><svg><use href="#${icon}"/></svg><span>${escapeHtml(sub)}</span></div>
+        <h4>${escapeHtml(title)}</h4>
+        <div class="dashboard-card__stats">
+          <div><span>来源数</span><strong>${stat.sources}</strong></div>
+          <div><span>累计论文</span><strong>${stat.articles}</strong></div>
+          <div><span>归档天数</span><strong>${stat.days}</strong></div>
         </div>
+        <p class="dashboard-card__desc">${escapeHtml(desc)}</p>
       </div>`;
-    }).join("");
-    accountGrid.querySelectorAll(".account-card").forEach((card) => {
-      card.addEventListener("click", () => openAccount(card.dataset.account));
-    });
+    dashboardCards.innerHTML = `
+      ${card("i-paper", "公众号", "WECHAT MP", pub, "微信读书订阅的 5 个环境/膜领域公众号，每日推文按账号归档。")}
+      ${card("i-search", "期刊", "JOURNALS RSS", jour, "各出版商 RSS 直连抓取（Nature / arXiv / ScienceDirect / ACS 等），按期刊归档。")}
+      <div class="dashboard-card is-fund">
+        <div class="dashboard-card__head"><svg><use href="#i-fund"/></svg><span>FUNDS · 规划中</span></div>
+        <h4>基金</h4>
+        <div class="dashboard-card__stats">
+          <div><span>申报通知</span><strong>—</strong></div>
+          <div><span>结题项目</span><strong>—</strong></div>
+          <div><span>状态</span><strong>占位</strong></div>
+        </div>
+        <p class="dashboard-card__desc">拟纳入基金申报通知与成熟/结题项目，待公众号、期刊两块稳定后设计。</p>
+      </div>`;
   }
 
   // ===== 页面切换 =====
-  function showOverview() {
+  function showView(view) {
+    state.view = view;
     state.currentAccount = null;
     document.querySelectorAll(".page").forEach((p) => p.classList.remove("is-visible"));
-    document.querySelector('[data-view="overview"]').classList.add("is-visible");
-    pageTitle.textContent = "公众号论文全景";
-    pageEyebrow.textContent = "PAPER MAP / 00";
-    setActiveNav("");
+    const page = document.querySelector(`.page[data-view="${view}"]`);
+    if (page) page.classList.add("is-visible");
+    setActiveNav(view);
+    const meta = {
+      dashboard: ["PAPER MAP / 00", "论文观察台"],
+      aggregate: ["AGGREGATE / ALL", "论文总控"],
+      fund: ["FUND / SOON", "基金模块"],
+    }[view] || ["", ""];
+    pageEyebrow.textContent = meta[0];
+    pageTitle.textContent = meta[1];
+    if (view === "aggregate") { state.aggPage = 1; loadAggregate(state.currentCategory, 1); }
   }
 
-  function setActiveNav(account) {
+  function setActiveNav(key) {
     navStack.querySelectorAll(".nav-item").forEach((btn) => {
-      btn.classList.toggle("is-active", btn.dataset.account === account);
+      const match = key && btn.dataset.view === key && !btn.dataset.account
+        ? true
+        : (key && btn.dataset.account === key ? true : false);
+      btn.classList.toggle("is-active", match);
     });
   }
 
-  async function openAccount(account) {
-    state.currentAccount = account;
+  async function openAccount(name) {
+    state.view = "account";
+    state.currentAccount = name;
     state.currentPage = 1;
     document.querySelectorAll(".page").forEach((p) => p.classList.remove("is-visible"));
-    document.querySelector('[data-view="account"]').classList.add("is-visible");
-    pageTitle.textContent = account;
+    document.querySelector('.page[data-view="account"]').classList.add("is-visible");
+    pageTitle.textContent = name;
     pageEyebrow.textContent = "ACCOUNT / ARCHIVE";
-    $("#account-page-title").textContent = account;
-    const acc = state.accounts.find((a) => a.name === account);
+    const acc = state.accounts.find((a) => a.name === name);
+    $("#account-page-title").textContent = name;
     $("#account-desc").textContent = acc
-      ? `累计 ${acc.article_count} 篇 · ${acc.day_count} 个归档日 · 最近 ${acc.last_date}`
-      : "按日期倒序回溯每篇推文。";
-    setActiveNav(account);
-    await loadAccountArticles(account, 1);
+      ? `累计 ${acc.article_count} 篇 · ${acc.day_count} 个归档日 · 最近 ${acc.last_date || "—"}`
+      : "按日期倒序回溯每篇内容。";
+    setActiveNav(name);
+    await loadAccountArticles(name, 1);
   }
 
-  // ===== 文章归档 =====
-  async function loadAccountArticles(account, page) {
-    try {
-      const data = await fetchJSON(`/api/articles?account=${encodeURIComponent(account)}&page=${page}&size=${state.pageSize}`);
-      console.log("[loadAccountArticles]", account, data);
-      state.totalPages = data.total_pages || 1;
-      renderTimeline(data.articles || []);
-      renderPagination(data.page, data.total_pages || 1);
-      $("#page-info").textContent = `${data.page} / ${data.total_pages || 1}`;
-    } catch (e) {
-      console.error("[loadAccountArticles] error:", e);
-      showToast("加载文章失败：" + e.message, true);
-      accountArticles.innerHTML = `<div class="empty empty--large">
-        <p>加载失败</p><p class="empty-hint">${escapeHtml(e.message)}</p>
-        <p class="empty-hint">请刷新页面重试，或检查后端是否在 8032 端口运行</p>
-      </div>`;
-    }
-  }
-
-  function renderTimeline(articles) {
-    console.log("[renderTimeline] called, type=", typeof articles, "isArray=", Array.isArray(articles), "len=", articles && articles.length);
-    if (!articles || !Array.isArray(articles) || !articles.length) {
-      console.log("[renderTimeline] -> empty branch");
-      accountArticles.innerHTML = `
+  // ===== 文章渲染（聚合 / 单来源共用） =====
+  function renderArticlesInto(container, pageEl, articles) {
+    if (!articles || !articles.length) {
+      container.innerHTML = `
         <div class="empty empty--large">
-          <p>该公众号暂无归档文章</p>
-          <p class="empty-hint">可能原因：① 公众号今天没发文 ② WeWe RSS 订阅源还没拉到该公众号</p>
-          <p class="empty-hint">试试点右上角「现场抓取」，触发一次重新抓取</p>
+          <p>该范围暂无归档文章</p>
+          <p class="empty-hint">可能原因：① 今天该源没发文 ② 出版商 RSS 在本环境被拦截（ScienceDirect / ACS / MDPI）</p>
+          <p class="empty-hint">试试点右上角「现场抓取」，或确认网络可访问该出版商</p>
         </div>`;
       return;
     }
-    // 按日期分组
     const groups = {};
     articles.forEach((a) => {
       const d = a.date || "未知";
-      if (!groups[d]) groups[d] = [];
-      groups[d].push(a);
+      (groups[d] = groups[d] || []).push(a);
     });
-    const html = Object.entries(groups).map(([date, list]) => `
+    container.innerHTML = Object.entries(groups).map(([date, list]) => `
       <div class="date-group">
         <div class="date-group__head"><span class="dot"></span><h3>${formatDateLabel(date)}</h3><span>${list.length} 篇</span></div>
         ${list.map((a) => `
@@ -261,69 +287,56 @@
             <div class="article-row__time">${formatTime(a.date_published)}</div>
             <div class="article-row__main">
               <h4>${escapeHtml(a.title)}</h4>
-              <p>${escapeHtml(a.summary || a.title)}</p>
+              <p>${escapeHtml((a.summary || a.title || ""))}</p>
             </div>
+            <span class="cat-badge ${catClass(a.category)}">${escapeHtml(a.category || "公众号")}</span>
             <div class="article-row__arrow"><svg><use href="#i-arrow"/></svg></div>
           </div>`).join("")}
       </div>`).join("");
-    console.log("[renderTimeline] html length=", html.length, "first 200:", html.slice(0, 200));
-    accountArticles.innerHTML = html;
-    // 强制 page 显示：JS 别处可能移除了 is-visible，这里重新加 + inline style 兜底
-    const page = accountArticles.closest('.page');
-    if (page) {
-      document.querySelectorAll('.page').forEach(p => p.classList.remove('is-visible'));
-      page.classList.add('is-visible');
-      page.style.cssText = "display: block !important; min-height: 500px !important; visibility: visible !important; opacity: 1 !important;";
-      console.log("[renderTimeline] fixed page is-visible:", page.classList.contains('is-visible'),
-        "pageDisplay=", getComputedStyle(page).display, "pageH=", page.offsetHeight);
-    } else {
-      console.warn("[renderTimeline] #account-articles not inside .page!");
-    }
-    // 强制可见：覆盖任何外部 CSS（包括残留的 display:grid / display:none / height:0）
-    accountArticles.style.cssText = "display: block !important; min-height: 300px !important; visibility: visible !important; opacity: 1 !important;";
-    const dg = accountArticles.querySelector(".date-group");
-    if (dg) dg.style.cssText = "display: block !important; min-height: 100px !important; visibility: visible !important;";
-    const ar = accountArticles.querySelector(".article-row");
-    if (ar) ar.style.cssText = "display: flex !important; min-height: 70px !important; visibility: visible !important; background: white !important; border: 1px solid #cbd1c8 !important;";
-    const fc = accountArticles.firstElementChild;
-    console.log("[renderTimeline] done, accountArticles.innerHTML length=", accountArticles.innerHTML.length,
-      "| containerH=", accountArticles.offsetHeight, "px",
-      "| childCount=", accountArticles.children.length,
-      "| firstChildH=", fc ? fc.offsetHeight : 'N/A', "px",
-      "| articleRowH=", ar ? ar.offsetHeight : 'N/A', "px",
-      "| pageH=", page ? page.offsetHeight : 'N/A', "px");
-    // 等一帧后再次确认 layout（强制同步）
-    requestAnimationFrame(() => {
-      const cs = getComputedStyle(accountArticles);
-      const ar2 = accountArticles.querySelector(".article-row");
-      const page2 = accountArticles.closest('.page');
-      console.log("[renderTimeline raf]",
-        "container display=" + cs.display,
-        "minH=" + cs.minHeight,
-        "containerH=" + accountArticles.offsetHeight,
-        "firstChildH=" + (fc ? fc.offsetHeight : 'N/A'),
-        "articleRowH=" + (ar2 ? ar2.offsetHeight : 'N/A'),
-        "pageH=" + (page2 ? page2.offsetHeight : 'N/A'),
-        "pageDisplay=" + (page2 ? getComputedStyle(page2).display : 'N/A'),
-        "pageIsVisible=" + (page2 ? page2.classList.contains('is-visible') : 'N/A'));
-    });
-    accountArticles.querySelectorAll(".article-row").forEach((row) => {
+    if (pageEl) pageEl.classList.add("is-visible");
+    container.querySelectorAll(".article-row").forEach((row) => {
       row.addEventListener("click", () => {
-        try {
-          openDrawer(JSON.parse(row.dataset.article));
-        } catch (e) {
-          openDrawer({ title: "文章", url: "#" });
-        }
+        try { openDrawer(JSON.parse(row.dataset.article)); }
+        catch (e) { openDrawer({ title: "文章", url: "#" }); }
       });
     });
   }
 
-  function renderPagination(page, totalPages) {
-    $("#page-prev").disabled = page <= 1;
-    $("#page-next").disabled = page >= totalPages;
-    $("#page-info").textContent = `${page} / ${totalPages}`;
-    $("#page-prev").onclick = () => { if (page > 1) { state.currentPage = page - 1; loadAccountArticles(state.currentAccount, state.currentPage); } };
-    $("#page-next").onclick = () => { if (page < totalPages) { state.currentPage = page + 1; loadAccountArticles(state.currentAccount, state.currentPage); } };
+  function setupPagination(prevBtn, nextBtn, infoEl, page, totalPages, onPage) {
+    prevBtn.disabled = page <= 1;
+    nextBtn.disabled = page >= totalPages;
+    infoEl.textContent = `${page} / ${totalPages}`;
+    prevBtn.onclick = () => { if (page > 1) onPage(page - 1); };
+    nextBtn.onclick = () => { if (page < totalPages) onPage(page + 1); };
+  }
+
+  // ===== 单来源归档 =====
+  async function loadAccountArticles(name, page) {
+    try {
+      const data = await fetchJSON(`/api/articles?account=${encodeURIComponent(name)}&page=${page}&size=${state.pageSize}`);
+      state.totalPages = data.total_pages || 1;
+      renderArticlesInto(accountArticles, null, data.articles || []);
+      setupPagination($("#page-prev"), $("#page-next"), $("#page-info"), page, data.total_pages || 1,
+        (p) => { state.currentPage = p; loadAccountArticles(name, p); });
+    } catch (e) {
+      showToast("加载文章失败：" + e.message, true);
+      accountArticles.innerHTML = `<div class="empty empty--large"><p>加载失败</p><p class="empty-hint">${escapeHtml(e.message)}</p></div>`;
+    }
+  }
+
+  // ===== 论文总控（聚合） =====
+  async function loadAggregate(category, page) {
+    try {
+      const q = category ? `&category=${encodeURIComponent(category)}` : "";
+      const data = await fetchJSON(`/api/articles?page=${page}&size=${state.pageSize}${q}`);
+      state.totalPages = data.total_pages || 1;
+      renderArticlesInto(aggregateArticles, null, data.articles || []);
+      setupPagination($("#agg-page-prev"), $("#agg-page-next"), $("#agg-page-info"), page, data.total_pages || 1,
+        (p) => { state.aggPage = p; loadAggregate(category, p); });
+    } catch (e) {
+      showToast("加载聚合失败：" + e.message, true);
+      aggregateArticles.innerHTML = `<div class="empty empty--large"><p>加载失败</p><p class="empty-hint">${escapeHtml(e.message)}</p></div>`;
+    }
   }
 
   // ===== 抽屉 =====
@@ -334,17 +347,18 @@
     $("#drawer-title").textContent = article.account || "文章";
     $("#drawer-purpose").textContent = article.date ? formatDateLabel(article.date) : "";
     $("#drawer-stats").innerHTML = `
-      <div class="drawer-stat"><span>公众号</span><strong>${escapeHtml(article.account || "—")}</strong></div>
-      <div class="drawer-stat"><span>归档日期</span><strong>${article.date || "—"}</strong></div>
+      <div class="drawer-stat"><span>来源</span><strong>${escapeHtml(article.account || "—")}</strong></div>
+      <div class="drawer-stat"><span>分类</span><strong>${escapeHtml(article.category || "公众号")}</strong></div>
       <div class="drawer-stat"><span>发布时间</span><strong>${formatTime(article.date_published) || "—"}</strong></div>`;
     $("#article-full-title").textContent = article.title || "";
     $("#article-full-meta").innerHTML = `
       <span><svg><use href="#i-clock"/></svg>${escapeHtml(article.date_published || "")}</span>
-      <span><svg><use href="#i-calendar"/></svg>${escapeHtml(article.date || "")}</span>`;
+      <span><svg><use href="#i-calendar"/></svg>${escapeHtml(article.date || "")}</span>
+      <span><svg><use href="#i-paper"/></svg>${escapeHtml(article.category || "公众号")}</span>`;
     $("#article-full-summary").textContent = article.summary || "（无摘要，请点击下方按钮查看原文）";
     const link = $("#article-full-link");
     link.href = article.url || "#";
-    if (!article.url) link.style.display = "none"; else link.style.display = "";
+    link.style.display = article.url ? "" : "none";
     drawer.classList.add("is-open");
     drawer.setAttribute("aria-hidden", "false");
     drawerBackdrop.hidden = false;
@@ -389,7 +403,8 @@
             showToast("抓取完成，已更新归档");
             snapshotTime.textContent = new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
             loadOverview();
-            if (state.currentAccount) loadAccountArticles(state.currentAccount, 1);
+            if (state.view === "account" && state.currentAccount) loadAccountArticles(state.currentAccount, 1);
+            if (state.view === "aggregate") loadAggregate(state.currentCategory, state.aggPage);
           } else {
             showToast("抓取失败，详见后端日志", true);
           }
@@ -407,16 +422,12 @@
     fetchButton.classList.remove("is-running");
     fetchButton.querySelector("span").textContent = "现场抓取";
   }
-
   fetchButton.addEventListener("click", triggerFetch);
 
-  // ===== 自定义抓取（日期范围） =====
+  // ===== 自定义抓取 =====
   function todayStr() {
     const d = new Date();
-    const y = d.getFullYear();
-    const m = String(d.getMonth() + 1).padStart(2, "0");
-    const day = String(d.getDate()).padStart(2, "0");
-    return `${y}-${m}-${day}`;
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
   }
   function openCustomFetch() {
     const t = todayStr();
@@ -425,30 +436,19 @@
     fetchCustomPop.hidden = false;
     fetchCustomStart.focus();
   }
-  function closeCustomFetch() {
-    fetchCustomPop.hidden = true;
-  }
+  function closeCustomFetch() { fetchCustomPop.hidden = true; }
   fetchCustomButton.addEventListener("click", openCustomFetch);
   fetchCustomClose.addEventListener("click", closeCustomFetch);
-  fetchCustomPop.addEventListener("click", (e) => {
-    if (e.target === fetchCustomPop) closeCustomFetch();
-  });
+  fetchCustomPop.addEventListener("click", (e) => { if (e.target === fetchCustomPop) closeCustomFetch(); });
   document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeCustomFetch(); });
 
   async function triggerCustomFetch() {
     let startDate = fetchCustomStart.value;
     let endDate = fetchCustomEnd.value;
-    if (!startDate || !endDate) {
-      showToast("请选择起始和结束日期", true);
-      return;
-    }
-    // 允许前后颠倒，自动纠正
-    if (startDate > endDate) {
-      const t = startDate; startDate = endDate; endDate = t;
-    }
+    if (!startDate || !endDate) { showToast("请选择起始和结束日期", true); return; }
+    if (startDate > endDate) { const t = startDate; startDate = endDate; endDate = t; }
     fetchCustomConfirm.disabled = true;
     fetchCustomConfirm.classList.add("is-running");
-    fetchCustomConfirm.querySelector("span").textContent = "抓取中…";
     try {
       await fetchJSON("/api/fetch-custom", {
         method: "POST",
@@ -460,17 +460,24 @@
       pollFetchStatus();
     } catch (e) {
       showToast("启动抓取失败：" + e.message, true);
-      resetCustomFetchButton();
+    } finally {
+      fetchCustomConfirm.disabled = false;
+      fetchCustomConfirm.classList.remove("is-running");
+      fetchCustomConfirm.querySelector("span").textContent = "开始抓取";
     }
   }
-
-  function resetCustomFetchButton() {
-    fetchCustomConfirm.disabled = false;
-    fetchCustomConfirm.classList.remove("is-running");
-    fetchCustomConfirm.querySelector("span").textContent = "开始抓取";
-  }
-
   fetchCustomConfirm.addEventListener("click", triggerCustomFetch);
+
+  // ===== 聚合筛选 chips =====
+  $("#filter-chips").querySelectorAll(".chip").forEach((chip) => {
+    chip.addEventListener("click", () => {
+      $("#filter-chips").querySelectorAll(".chip").forEach((c) => c.classList.remove("is-active"));
+      chip.classList.add("is-active");
+      state.currentCategory = chip.dataset.cat || "";
+      state.aggPage = 1;
+      loadAggregate(state.currentCategory, 1);
+    });
+  });
 
   // ===== 启动 =====
   checkHealth();

@@ -1,17 +1,20 @@
 #!/usr/bin/env python3
 """
-公众号论文观察台 - 本地 Web 管理后端（纯标准库，零依赖）。
+论文观察台 - 本地 Web 管理后端（纯标准库，零依赖）。
 
 仿照「Project Atlas 项目文件总控」的架构：BaseHTTPRequestHandler + ThreadingHTTPServer。
 
 数据源：本地存档目录 A:\\研零课题\\研零课题资料\\每日推送\\每日论文推送\\YYYY.M.D\\articles.json
+信息源分两类，每篇文章带 category 字段：
+  - 公众号：微信读书订阅，经 WeWe RSS 抓取
+  - 期刊：各出版商 RSS 直连抓取（scripts/fetch_journals.py）
 
 API：
   GET  /api/health          健康检查
-  GET  /api/overview        总览（公众号汇总 + 全局统计）
-  GET  /api/accounts        公众号列表
-  GET  /api/articles        文章列表（?account=&page=&size=）
-  GET  /api/dates           某公众号的日期列表（?account=）
+  GET  /api/overview        总览（按分类汇总：公众号 / 期刊 + 全局统计）
+  GET  /api/accounts        信息源列表（带 category）
+  GET  /api/articles        文章列表（?account=&category=&page=&size=）
+  GET  /api/dates           某来源的日期列表（?account=）
   POST /api/fetch           触发现场抓取（后台跑 daily.py --force）
   GET  /api/fetch/status    现场抓取状态
 """
@@ -29,6 +32,7 @@ from urllib.parse import urlparse, parse_qs
 APP_DIR = Path(__file__).resolve().parent
 PROJECT_DIR = APP_DIR.parent
 CONFIG_PATH = PROJECT_DIR / "config" / "config.json"
+JOURNALS_CONFIG_PATH = PROJECT_DIR / "config" / "journals.json"
 SCRIPTS_DIR = PROJECT_DIR / "scripts"
 PYTHON_EXE = SCRIPTS_DIR / ".venv" / "Scripts" / "python.exe"
 DAILY_PY = SCRIPTS_DIR / "daily.py"
@@ -46,6 +50,17 @@ def reload_paths():
     global ARCHIVE_DIR
     _config = load_config()
     ARCHIVE_DIR = Path(_config["output"]["local_dir"])
+
+
+def load_journals_config() -> list:
+    """读取 config/journals.json 中的期刊清单（可提交、无敏感信息）。"""
+    if not JOURNALS_CONFIG_PATH.exists():
+        return []
+    try:
+        with open(JOURNALS_CONFIG_PATH, "r", encoding="utf-8") as f:
+            return json.load(f).get("journals", [])
+    except Exception:
+        return []
 
 
 FETCH_STATE: dict = {
@@ -85,59 +100,83 @@ def _date_key(date_str: str) -> str:
 
 
 def get_accounts() -> list[dict]:
-    """汇总公众号：合并白名单（config.json）+ 本地存档（开放结构）。
+    """汇总所有来源（公众号 + 期刊）：合并配置白名单 + 期刊清单 + 本地存档。
 
-    白名单中的公众号即使暂无归档也会列出（article_count=0）。
-    本地存档中发现的额外公众号也会列出（has_whitelist=false）。
+    - 配置中的源（无论有无归档）都会列出，便于在导航里常驻
+    - 每个源带 category 字段（公众号 / 期刊）
+    - 旧存档文章若无 category，按白名单/期刊映射回退为「公众号」
     """
-    # 每次重新加载配置，保证白名单是最新
     cfg = load_config()
     whitelist = cfg.get("wewe_rss", {}).get("feeds", [])
-    whitelist_names = {f["name"] for f in whitelist if f.get("name")}
+    whitelist_map = {f["name"]: f.get("category", "公众号") for f in whitelist if f.get("name")}
+    journals = load_journals_config()
+    journal_map = {j["name"]: "期刊" for j in journals}
+
+    sources: dict[str, dict] = {}
+    for name, cat in whitelist_map.items():
+        sources[name] = {"name": name, "category": cat}
+    for name in journal_map:
+        if name not in sources:
+            sources[name] = {"name": name, "category": "期刊"}
 
     archive = scan_archive()
-    accs: dict[str, dict] = {}
+    counts: dict[str, dict] = {}
     for date_str, articles in archive.items():
         for a in articles:
-            name = a.get("account") or "未知公众号"
-            if name not in accs:
-                accs[name] = {"name": name, "article_count": 0, "dates": set()}
-            accs[name]["article_count"] += 1
-            accs[name]["dates"].add(date_str)
-
-    # 加入白名单中暂无数据的公众号
-    for name in whitelist_names:
-        if name not in accs:
-            accs[name] = {"name": name, "article_count": 0, "dates": set()}
+            name = a.get("account") or "未知源"
+            cat = (a.get("category")
+                   or whitelist_map.get(name) or journal_map.get(name) or "公众号")
+            if name not in counts:
+                counts[name] = {"article_count": 0, "dates": set(), "category": cat}
+            counts[name]["article_count"] += 1
+            counts[name]["dates"].add(date_str)
+            counts[name]["category"] = cat
 
     result = []
-    for name, acc in accs.items():
-        dates = sorted(acc["dates"], key=_date_key, reverse=True)
+    for name, src in sources.items():
+        c = counts.get(name, {"article_count": 0, "dates": set(), "category": src["category"]})
+        dates = sorted(c["dates"], key=_date_key, reverse=True)
         result.append({
             "name": name,
-            "article_count": acc["article_count"],
+            "category": c["category"],
+            "article_count": c["article_count"],
             "day_count": len(dates),
             "last_date": dates[0] if dates else None,
             "dates": dates,
-            "in_whitelist": name in whitelist_names,
+            "configured": True,
         })
-    # 排序：白名单优先（有数据更靠前），然后按文章数
-    result.sort(key=lambda x: (not x["in_whitelist"], -x["article_count"], x["name"]))
+    # 存档中但不在配置里的（未知源），也列出
+    for name, c in counts.items():
+        if name not in sources:
+            dates = sorted(c["dates"], key=_date_key, reverse=True)
+            result.append({
+                "name": name, "category": c["category"],
+                "article_count": c["article_count"], "day_count": len(dates),
+                "last_date": dates[0] if dates else None, "dates": dates,
+                "configured": False,
+            })
+
+    cat_order = {"公众号": 0, "期刊": 1, "基金": 2}
+    result.sort(key=lambda x: (cat_order.get(x["category"], 9), not x["configured"], -x["article_count"], x["name"]))
     return result
 
 
-def fetch_articles(account: str | None = None, page: int = 1, size: int = 10) -> dict:
-    """返回文章列表（跨日期，按日期倒序），可按公众号筛选 + 分页。"""
+def fetch_articles(account: str | None = None, category: str | None = None,
+                   page: int = 1, size: int = 10) -> dict:
+    """返回文章列表（跨日期，按日期倒序），可按来源/分类筛选 + 分页。"""
     archive = scan_archive()
     flat: list[dict] = []
     for date_str, articles in archive.items():
         for a in articles:
             item = dict(a)
             item["date"] = date_str
+            item["category"] = a.get("category") or "公众号"
             flat.append(item)
 
     if account:
-        flat = [a for a in flat if (a.get("account") or "未知公众号") == account]
+        flat = [a for a in flat if (a.get("account") or "未知源") == account]
+    if category:
+        flat = [a for a in flat if a["category"] == category]
 
     total = len(flat)
     start = (page - 1) * size
@@ -277,8 +316,17 @@ class Handler(BaseHTTPRequestHandler):
                 accounts = get_accounts()
                 total_articles = sum(a["article_count"] for a in accounts)
                 total_days = len(scan_archive())
+                # 按分类汇总
+                categories: dict[str, dict] = {}
+                for a in accounts:
+                    cat = a["category"]
+                    bucket = categories.setdefault(cat, {"sources": 0, "articles": 0, "days": 0})
+                    bucket["sources"] += 1
+                    bucket["articles"] += a["article_count"]
+                    bucket["days"] = max(bucket["days"], a["day_count"])
                 json_response(self, {
                     "accounts": accounts,
+                    "categories": categories,
                     "total_articles": total_articles,
                     "total_accounts": len(accounts),
                     "total_days": total_days,
@@ -289,9 +337,10 @@ class Handler(BaseHTTPRequestHandler):
             elif path == "/api/articles":
                 reload_paths()
                 account = (qs.get("account") or [None])[0]
+                category = (qs.get("category") or [None])[0]
                 page = int((qs.get("page") or ["1"])[0])
                 size = int((qs.get("size") or ["10"])[0])
-                json_response(self, fetch_articles(account, page, size))
+                json_response(self, fetch_articles(account, category, page, size))
             elif path == "/api/dates":
                 reload_paths()
                 account = (qs.get("account") or [None])[0]
@@ -332,7 +381,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="公众号论文观察台")
+    parser = argparse.ArgumentParser(description="论文观察台")
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=8032)
     args = parser.parse_args()

@@ -51,9 +51,9 @@ python install_startup.py --remove  # 卸载
 
 > 前提：Docker Desktop 需开启「开机自启」（Settings → General → Start Docker Desktop when you sign in），容器已配置 `restart: unless-stopped`。
 
-## Web 管理系统
+## Web 管理系统（论文观察台）
 
-桌面双击「公众号论文观察台」快捷方式（`C:\Users\PC\Desktop\公众号论文观察台.lnk`），或手动：
+桌面双击「论文观察台」快捷方式（`C:\Users\PC\Desktop\论文观察台.lnk`），或手动：
 
 ```bash
 cd "A:\workbuddy项目\推送公众号论文\web"
@@ -62,12 +62,26 @@ python paper_observatory.py --port 8032
 
 浏览器打开 http://127.0.0.1:8032：
 
-- **全局总览**：公众号数 / 累计文章 / 归档天数 / 最近归档
-- **公众号归档**：点侧边栏或卡片进入，按日期倒序翻页浏览历史推文
-- **文章抽屉**：点文章弹出详情（标题、公众号、时间、摘要、原文链接）
+- **文件总控**：公众号 / 期刊 / 基金 三类信息源状态卡片
+- **论文总控**：聚合所有来源最新论文，可按「全部 / 公众号 / 期刊」筛选
+- **公众号 / 期刊分组**：点分组展开各来源，点来源进入按日期倒序浏览
+- **文章抽屉**：点文章弹出详情（标题、来源、分类、时间、摘要、原文链接）
 - **现场抓取**：右上角按钮，强制重抓当天文章（`daily.py --force`），抓完自动刷新
 
 > 现场抓取与每日推送共用「按日期分文件夹」的存档，天然去重，不会重复推送历史文章。
+
+## 添加新期刊
+
+期刊清单配置在 `config/journals.json`（可提交、无密码），详见 [docs/journals.md](journals.md)：
+
+1. 在 `config/journals.json` 的 `journals` 数组追加一项：
+   ```json
+   { "name": "期刊名", "rss": "https://.../feed", "publisher": "出版商", "note": "说明" }
+   ```
+2. 确认该 RSS 在本环境可访问（ScienceDirect / ACS / MDPI 常被拦截，详见 journals.md）
+3. 跑一次现场抓取或 `python daily.py --force` 即可生效
+
+> 公众号的添加方式见上节「添加新公众号」；期刊不走 WeWe RSS，直接 RSS 直连。
 
 ## 添加新公众号
 

@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light">
-  <title>Paper Observatory · 公众号论文观察台</title>
+  <title>Paper Observatory · 论文观察台</title>
   <link rel="stylesheet" href="/paper_observatory.css">
 </head>
 <body>
@@ -21,6 +21,8 @@
     <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
     <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 14a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1.5 1.5"/><path d="M14 10a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1.5-1.5"/></symbol>
     <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 6.5h7l2 2h9v10H3z"/></symbol>
+    <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></symbol>
+    <symbol id="i-fund" viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-7M21 20H3"/></symbol>
   </svg>
 
   <div class="app-shell">
@@ -29,14 +31,12 @@
         <div class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></div>
         <div>
           <p class="brand-kicker">PAPER OBSERVATORY</p>
-          <h1>公众号<br>观察台</h1>
+          <h1>论文<br>观察台</h1>
         </div>
       </div>
 
-      <nav class="nav-stack" id="nav-stack">
-        <button class="nav-item is-active" data-account="" data-view="overview" aria-label="全局总览">
-          <svg><use href="#i-grid"/></svg><span>全局总览</span><b>ALL</b>
-        </button>
+      <nav class="nav-stack" id="nav-stack" aria-label="导航">
+        <!-- 由 JS 渲染：文件总控 / 论文总控 / 公众号(分组) / 期刊(分组) / 基金 -->
       </nav>
 
       <div class="sidebar-foot">
@@ -48,8 +48,8 @@
     <main id="main-content" class="main-stage" tabindex="-1">
       <header class="topbar">
         <div>
-          <p class="eyebrow" id="page-eyebrow">PAPER MAP / 00</p>
-          <h2 id="page-title">公众号论文全景</h2>
+          <p class="eyebrow" id="page-eyebrow">PAPER MAP</p>
+          <h2 id="page-title">论文观察台</h2>
         </div>
         <div class="topbar-actions">
           <div class="snapshot-time"><span>最近抓取</span><strong id="snapshot-time">读取中…</strong></div>
@@ -67,7 +67,7 @@
           <button class="icon-button" id="custom-fetch-close" type="button" aria-label="关闭"><svg><use href="#i-close"/></svg></button>
           <p class="eyebrow">CUSTOM FETCH / DATE RANGE</p>
           <h3>自定义抓取日期范围</h3>
-          <p class="custom-fetch-pop__hint">选定一个日期范围，抓取该区间内的文章。<b>起始 = 结束</b> 即只抓那一天；已抓过的日期自动跳过。</p>
+          <p class="custom-fetch-pop__hint">选定一个日期范围，抓取该区间内的文章（公众号 + 期刊）。<b>起始 = 结束</b> 即只抓那一天；已抓过的日期自动跳过。</p>
           <div class="custom-fetch-pop__range">
             <label>起始日期<input type="date" id="custom-fetch-start"></label>
             <span class="custom-fetch-pop__sep">至</span>
@@ -79,30 +79,65 @@
         </div>
       </div>
 
-      <section class="page is-visible" data-view="overview" aria-labelledby="page-title">
+      <!-- 文件总控 -->
+      <section class="page is-visible" data-view="dashboard" aria-labelledby="page-title">
         <div class="atlas-hero">
           <div class="hero-copy">
-            <p class="hero-index">WECHAT PAPER · DAILY DIGEST</p>
-            <h3>把每天的推文<br><em>收进一张地图里。</em></h3>
-            <p>聚合你关注的公众号论文推文，按公众号、按日期归档检索。点击任意公众号，回溯它每一天发布的内容，也可随时现场抓取最新文章。</p>
+            <p class="hero-index">PAPER OBSERVATORY · 总控</p>
+            <h3>把公众号推文与<br><em>期刊最新论文收进一张地图。</em></h3>
+            <p>左侧按「公众号 / 期刊 / 基金」分类管理你的信息源。公众号来自微信读书订阅，期刊来自各出版商 RSS 直连。点击任意来源，回溯它每天发布的内容。</p>
           </div>
-          <div class="topology" id="topology" aria-label="公众号拓扑摘要"></div>
+          <div class="topology" id="topology" aria-label="信息源拓扑摘要"></div>
         </div>
         <div class="metric-strip" id="metric-strip"></div>
-        <div class="section-heading"><div><span>ACTIVE ACCOUNTS</span><h3>关注的公众号</h3></div><p>按文章数量排序，点击进入历史归档。</p></div>
-        <div class="project-grid" id="account-grid"></div>
+        <div class="section-heading"><div><span>FILE CONTROL</span><h3>文件总控 · 信息源概览</h3></div><p>公众号、期刊、基金三类信息源的状态一览。</p></div>
+        <div class="dashboard-cards" id="dashboard-cards"></div>
       </section>
 
+      <!-- 论文总控（聚合） -->
+      <section class="page" data-view="aggregate" aria-labelledby="page-title">
+        <div class="section-intro">
+          <div><span id="aggregate-kicker">AGGREGATE</span><h3 id="aggregate-page-title">论文总控</h3></div>
+          <p>聚合所有来源的最新论文，可按分类筛选。</p>
+        </div>
+        <div class="filter-chips" id="filter-chips">
+          <button class="chip is-active" data-cat="">全部</button>
+          <button class="chip" data-cat="公众号">公众号</button>
+          <button class="chip" data-cat="期刊">期刊</button>
+        </div>
+        <div class="date-timeline" id="aggregate-articles"></div>
+        <div class="pagination" id="aggregate-pagination">
+          <button type="button" id="agg-page-prev">上一页</button>
+          <span id="agg-page-info">1 / 1</span>
+          <button type="button" id="agg-page-next">下一页</button>
+        </div>
+      </section>
+
+      <!-- 单来源归档 -->
       <section class="page" data-view="account" aria-labelledby="account-page-title">
         <div class="section-intro">
-          <div><span id="account-kicker">ACCOUNT / ARCHIVE</span><h3 id="account-page-title">公众号归档</h3></div>
-          <p id="account-desc">按日期倒序回溯该公众号的每篇推文。</p>
+          <div><span id="account-kicker">ACCOUNT / ARCHIVE</span><h3 id="account-page-title">来源归档</h3></div>
+          <p id="account-desc">按日期倒序回溯该来源每篇内容。</p>
         </div>
         <div class="date-timeline" id="account-articles"></div>
         <div class="pagination" id="account-pagination">
           <button type="button" id="page-prev">上一页</button>
           <span id="page-info">1 / 1</span>
           <button type="button" id="page-next">下一页</button>
+        </div>
+      </section>
+
+      <!-- 基金（占位） -->
+      <section class="page" data-view="fund" aria-labelledby="page-title">
+        <div class="fund-placeholder">
+          <svg class="fund-placeholder__icon"><use href="#i-fund"/></svg>
+          <h3>基金模块 · 规划中</h3>
+          <p>计划纳入两类信息：</p>
+          <ul>
+            <li><b>基金申报通知</b>——各类基金（国自然等）的申报指南、截止日期提醒。</li>
+            <li><b>结题 / 成熟项目</b>——已结题或成熟运转的基金项目，跟踪其产出与方向。</li>
+          </ul>
+          <p class="fund-placeholder__hint">数据源与接入方式将在公众号、期刊两块稳定后设计，本期仅占位。</p>
         </div>
       </section>
     </main>

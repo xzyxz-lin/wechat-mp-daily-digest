@@ -20,12 +20,13 @@ SCRIPT_DIR = Path(__file__).parent
 sys.path.insert(0, str(SCRIPT_DIR))
 
 from fetch_articles import load_config, fetch_daily
+from fetch_journals import fetch_daily as fetch_journals_daily
 from render import render_html, render_markdown
 from send_email import send_email
 
 
 def parse_args():
-    p = argparse.ArgumentParser(description="公众号每日论文推送")
+    p = argparse.ArgumentParser(description="每日论文推送（公众号 + 期刊）")
     p.add_argument("--start", help="起始日期 (YYYY-MM-DD)，默认今天")
     p.add_argument("--end", help="结束日期 (YYYY-MM-DD)，默认等于 start")
     p.add_argument("--date", help="单天抓取 (YYYY-MM-DD)，等价于 --start=--end")
@@ -104,6 +105,14 @@ def run_one_day(config, target_date, args):
     # 1. 抓取
     print("\n[1/4] 抓取文章 ...")
     articles = fetch_daily(config, target_date)
+    # 1.1 抓取期刊论文（直连 RSS，与公众号写入同一存档）
+    try:
+        journal_articles = fetch_journals_daily(config, target_date)
+        if journal_articles:
+            articles.extend(journal_articles)
+            print(f"[1/4] 公众号 {len(articles) - len(journal_articles)} 篇 + 期刊 {len(journal_articles)} 篇")
+    except Exception as e:
+        print(f"[1/4] 期刊抓取异常（已忽略，不影响公众号）: {e}")
     if not articles:
         print(f"{target_date_str} 没有文章，跳过。")
         return [], False
@@ -148,7 +157,7 @@ def run_one_day(config, target_date, args):
     # 4. 邮件（仅当有新增文章时才发）
     if has_new and not args.no_email and not args.dry_run:
         print("\n[4/4] 发送邮件 ...")
-        subject = f"{config['email'].get('subject_prefix', '')}{target_date_str} 公众号推送（共 {len(articles)} 篇）"
+        subject = f"{config['email'].get('subject_prefix', '')}{target_date_str} 论文推送（共 {len(articles)} 篇）"
         try:
             send_email(config, subject, html, html_path, md_path)
         except Exception as e:
@@ -166,7 +175,7 @@ def main():
     dates = build_date_range(args)
 
     print("=" * 50)
-    print("公众号每日论文推送")
+    print("每日论文推送（公众号 + 期刊）")
     print(f"待抓取日期: {[d.strftime('%Y-%m-%d') for d in dates]}")
     if args.dry_run:
         print("模式: DRY RUN")
