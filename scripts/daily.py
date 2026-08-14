@@ -60,15 +60,37 @@ def build_date_range(args) -> list[date]:
     return [start + timedelta(days=i) for i in range(days + 1)]
 
 
+def _article_key(a):
+    """文章唯一标识，用于增量对比。优先 id，其次 url，最后 title。"""
+    return a.get("id") or a.get("url") or a.get("title") or ""
+
+
+def _load_existing_keys(json_path):
+    """读取已存档 articles.json 的文章键集合；不存在则返回空集合。"""
+    if not json_path.exists():
+        return set()
+    try:
+        with open(json_path, "r", encoding="utf-8") as f:
+            old = json.load(f)
+        return {_article_key(a) for a in old if _article_key(a)}
+    except Exception:
+        return set()
+
+
 def run_one_day(config, target_date, args):
-    """抓取并处理单个日期，返回 (articles, 是否已跳过)。"""
+    """抓取并处理单个日期，返回 (articles, 是否已跳过)。
+
+    增量逻辑：对比已存档 articles.json，只有「有新增文章」时才发邮件；
+    文章无变化（重复点现场抓取）则只更新本地文件、不发邮件。
+    """
     target_date_str = target_date.strftime("%Y-%m-%d")
     day_folder = f"{target_date.year}.{target_date.month}.{target_date.day}"
+    base_dir = Path(config["output"]["local_dir"])
+    day_dir = base_dir / day_folder
+    json_path = day_dir / "articles.json"
 
     # 幂等检查：当天已推送过则跳过（除非 --force 或 --dry-run）
     if not args.force and not args.dry_run:
-        base_dir = Path(config["output"]["local_dir"])
-        day_dir = base_dir / day_folder
         html_file = day_dir / f"{day_folder}.html"
         md_file = day_dir / f"{day_folder}.md"
         if html_file.exists() and md_file.exists():
@@ -86,6 +108,13 @@ def run_one_day(config, target_date, args):
         print(f"{target_date_str} 没有文章，跳过。")
         return [], False
 
+    # 1.5 增量对比：判断是否有新文章（相对已存档）
+    existing_keys = _load_existing_keys(json_path)
+    new_keys = {_article_key(a) for a in articles if _article_key(a)}
+    has_new = bool(new_keys - existing_keys)
+    if not has_new and existing_keys:
+        print(f"[no-new] {target_date_str} 无新文章（与已存档一致），跳过邮件发送")
+
     # 2. 渲染
     print("\n[2/4] 渲染 HTML 和 Markdown ...")
     render_cfg = config.get("render", {})
@@ -101,17 +130,14 @@ def run_one_day(config, target_date, args):
         sort_desc=render_cfg.get("sort_desc", True),
     )
 
-    # 3. 保存本地
+    # 3. 保存本地（无论有无新文章，都更新文件，保证本地/Web 内容最新）
     html_path = None
     md_path = None
     if not args.no_local and not args.dry_run:
         print("\n[3/4] 保存到本地 ...")
-        base_dir = Path(config["output"]["local_dir"])
-        day_dir = base_dir / day_folder
         day_dir.mkdir(parents=True, exist_ok=True)
         html_path = day_dir / f"{day_folder}.html"
         md_path = day_dir / f"{day_folder}.md"
-        json_path = day_dir / "articles.json"
         html_path.write_text(html, encoding="utf-8")
         md_path.write_text(md, encoding="utf-8")
         json_path.write_text(json.dumps(articles, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -119,8 +145,8 @@ def run_one_day(config, target_date, args):
         print(f"  - {md_path}")
         print(f"  - {json_path}")
 
-    # 4. 邮件（每个有文章的日期都发对应日期的邮件）
-    if not args.no_email and not args.dry_run:
+    # 4. 邮件（仅当有新增文章时才发）
+    if has_new and not args.no_email and not args.dry_run:
         print("\n[4/4] 发送邮件 ...")
         subject = f"{config['email'].get('subject_prefix', '')}{target_date_str} 公众号推送（共 {len(articles)} 篇）"
         try:
@@ -128,6 +154,8 @@ def run_one_day(config, target_date, args):
         except Exception as e:
             print(f"[email] ERROR: 邮件发送失败: {e}")
             print("[email] 本地文件已保存，邮件可稍后重发")
+    elif not has_new and not args.no_email and not args.dry_run:
+        print(f"\n[4/4] {target_date_str} 无新文章，不发送邮件")
 
     return articles, False
 
