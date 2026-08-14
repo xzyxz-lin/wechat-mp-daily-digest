@@ -119,9 +119,10 @@ svg { width: 1.25rem; height: 1.25rem; fill: none; stroke: currentColor; stroke-
 .custom-fetch-pop__inner h3 { margin: 6px 0 0; font: 540 1.35rem/1.15 var(--font-display); }
 .custom-fetch-pop__hint { margin: 14px 0 18px; color: var(--ink-700); font-size: .83rem; line-height: 1.6; }
 .custom-fetch-pop__hint b { color: var(--oxide-700); }
-.custom-fetch-pop__row { display: flex; align-items: center; gap: 10px; margin-bottom: 22px; }
-.custom-fetch-pop__row input { width: 120px; min-height: 46px; padding: 0 14px; font: 620 1.2rem var(--font-data); color: var(--ink-900); background: white; border: 1px solid var(--paper-400); border-radius: 3px; }
-.custom-fetch-pop__row span { color: var(--ink-700); }
+.custom-fetch-pop__range { display: grid; grid-template-columns: 1fr auto 1fr; align-items: end; gap: 12px; margin-bottom: 22px; }
+.custom-fetch-pop__range label { display: grid; gap: 6px; color: var(--ink-700); font-size: .78rem; }
+.custom-fetch-pop__range input { width: 100%; min-height: 46px; padding: 0 12px; font: 620 1rem var(--font-data); color: var(--ink-900); background: white; border: 1px solid var(--paper-400); border-radius: 3px; box-sizing: border-box; }
+.custom-fetch-pop__sep { padding-bottom: 14px; color: var(--ink-600); font-size: .85rem; }
 .custom-fetch-pop__inner .icon-button { position: absolute; top: 14px; right: 14px; }
 .custom-fetch-pop__inner .scan-button { width: 100%; justify-content: center; }
 

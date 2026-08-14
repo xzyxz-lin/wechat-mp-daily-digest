@@ -26,7 +26,8 @@
   const fetchCustomButton = $("#fetch-custom-button");
   const fetchCustomPop = $("#custom-fetch-pop");
   const fetchCustomClose = $("#custom-fetch-close");
-  const fetchCustomDays = $("#custom-fetch-days");
+  const fetchCustomStart = $("#custom-fetch-start");
+  const fetchCustomEnd = $("#custom-fetch-end");
   const fetchCustomConfirm = $("#custom-fetch-confirm");
   const toast = $("#toast");
 
@@ -403,11 +404,20 @@
 
   fetchButton.addEventListener("click", triggerFetch);
 
-  // ===== 自定义抓取（往前倒 N 天） =====
+  // ===== 自定义抓取（日期范围） =====
+  function todayStr() {
+    const d = new Date();
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${y}-${m}-${day}`;
+  }
   function openCustomFetch() {
+    const t = todayStr();
+    if (!fetchCustomStart.value) fetchCustomStart.value = t;
+    if (!fetchCustomEnd.value) fetchCustomEnd.value = t;
     fetchCustomPop.hidden = false;
-    fetchCustomDays.focus();
-    fetchCustomDays.select();
+    fetchCustomStart.focus();
   }
   function closeCustomFetch() {
     fetchCustomPop.hidden = true;
@@ -420,26 +430,30 @@
   document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeCustomFetch(); });
 
   async function triggerCustomFetch() {
-    const raw = fetchCustomDays.value;
-    const days = parseInt(raw, 10);
-    if (isNaN(days) || days < 0 || days > 30) {
-      showToast("请输入 0~30 之间的天数", true);
+    let startDate = fetchCustomStart.value;
+    let endDate = fetchCustomEnd.value;
+    if (!startDate || !endDate) {
+      showToast("请选择起始和结束日期", true);
       return;
+    }
+    // 允许前后颠倒，自动纠正
+    if (startDate > endDate) {
+      const t = startDate; startDate = endDate; endDate = t;
     }
     fetchCustomConfirm.disabled = true;
     fetchCustomConfirm.classList.add("is-running");
-    fetchCustomConfirm.querySelector("span").textContent = "补抓中…";
+    fetchCustomConfirm.querySelector("span").textContent = "抓取中…";
     try {
       await fetchJSON("/api/fetch-custom", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ days }),
+        body: JSON.stringify({ start_date: startDate, end_date: endDate }),
       });
-      showToast(`自定义抓取已启动，往前补抓 ${days} 天…`);
+      showToast(`自定义抓取已启动：${startDate} ~ ${endDate}`);
       closeCustomFetch();
       pollFetchStatus();
     } catch (e) {
-      showToast("启动补抓失败：" + e.message, true);
+      showToast("启动抓取失败：" + e.message, true);
       resetCustomFetchButton();
     }
   }
@@ -447,7 +461,7 @@
   function resetCustomFetchButton() {
     fetchCustomConfirm.disabled = false;
     fetchCustomConfirm.classList.remove("is-running");
-    fetchCustomConfirm.querySelector("span").textContent = "开始补抓";
+    fetchCustomConfirm.querySelector("span").textContent = "开始抓取";
   }
 
   fetchCustomConfirm.addEventListener("click", triggerCustomFetch);

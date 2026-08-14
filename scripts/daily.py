@@ -1,13 +1,14 @@
 """
 主入口：抓取 -> 渲染 -> 保存本地 -> 发送邮件。
 命令行参数：
-  --date 2026-08-13   指定日期（默认今天）
-  --days N            从今天往前倒 N 天，逐天抓取（含今天，0=只抓今天）
-  --dry-run           只抓取不写本地不发邮件
-  --no-email          跳过邮件
-  --no-local          跳过本地存档
-  --force             强制重跑（即使当天已推送）
-  --config <path>     指定配置文件
+  --start 2026-08-12   起始日期（默认今天）
+  --end   2026-08-14   结束日期（默认等于 start）
+  --date  2026-08-13   单天抓取（等价于 --start=--end=该日期）
+  --dry-run            只抓取不写本地不发邮件
+  --no-email           跳过邮件
+  --no-local           跳过本地存档
+  --force              强制重跑（即使当天已推送）
+  --config <path>      指定配置文件
 """
 import argparse
 import json
@@ -25,9 +26,9 @@ from send_email import send_email
 
 def parse_args():
     p = argparse.ArgumentParser(description="公众号每日论文推送")
-    p.add_argument("--date", help="指定日期 (YYYY-MM-DD)，默认今天")
-    p.add_argument("--days", type=int, default=None,
-                   help="从今天往前倒 N 天逐天抓取（含今天）。与 --date 互斥")
+    p.add_argument("--start", help="起始日期 (YYYY-MM-DD)，默认今天")
+    p.add_argument("--end", help="结束日期 (YYYY-MM-DD)，默认等于 start")
+    p.add_argument("--date", help="单天抓取 (YYYY-MM-DD)，等价于 --start=--end")
     p.add_argument("--dry-run", action="store_true", help="只抓取不写本地不发邮件")
     p.add_argument("--no-email", action="store_true", help="跳过邮件发送")
     p.add_argument("--no-local", action="store_true", help="跳过本地存档")
@@ -35,6 +36,28 @@ def parse_args():
     p.add_argument("--config", default=str(SCRIPT_DIR.parent / "config" / "config.json"),
                    help="配置文件路径")
     return p.parse_args()
+
+
+def parse_date_arg(s):
+    try:
+        return datetime.strptime(s, "%Y-%m-%d").date()
+    except ValueError:
+        print(f"ERROR: 日期格式不正确，应为 YYYY-MM-DD: {s}")
+        sys.exit(1)
+
+
+def build_date_range(args) -> list[date]:
+    """根据命令行参数确定要抓取的日期范围（闭区间）。"""
+    today = date.today()
+    if args.date:
+        d = parse_date_arg(args.date)
+        return [d]
+    start = parse_date_arg(args.start) if args.start else today
+    end = parse_date_arg(args.end) if args.end else start
+    if start > end:
+        start, end = end, start  # 允许前后颠倒，自动纠正
+    days = (end - start).days
+    return [start + timedelta(days=i) for i in range(days + 1)]
 
 
 def run_one_day(config, target_date, args):
@@ -96,8 +119,8 @@ def run_one_day(config, target_date, args):
         print(f"  - {md_path}")
         print(f"  - {json_path}")
 
-    # 4. 邮件（历史补抓默认不发邮件，除非显式要求；今天才发）
-    if not args.no_email and not args.dry_run and target_date == date.today():
+    # 4. 邮件（每个有文章的日期都发对应日期的邮件）
+    if not args.no_email and not args.dry_run:
         print("\n[4/4] 发送邮件 ...")
         subject = f"{config['email'].get('subject_prefix', '')}{target_date_str} 公众号推送（共 {len(articles)} 篇）"
         try:
@@ -111,22 +134,8 @@ def run_one_day(config, target_date, args):
 
 def main():
     args = parse_args()
-
     config = load_config(args.config)
-
-    # 确定要抓取的日期列表
-    if args.date:
-        try:
-            target = datetime.strptime(args.date, "%Y-%m-%d").date()
-        except ValueError:
-            print(f"ERROR: 日期格式不正确，应为 YYYY-MM-DD: {args.date}")
-            sys.exit(1)
-        dates = [target]
-    elif args.days is not None:
-        today = date.today()
-        dates = [today - timedelta(days=i) for i in range(args.days + 1)]
-    else:
-        dates = [date.today()]
+    dates = build_date_range(args)
 
     print("=" * 50)
     print("公众号每日论文推送")

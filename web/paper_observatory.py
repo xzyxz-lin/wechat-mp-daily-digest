@@ -167,11 +167,11 @@ def fetch_dates(account: str | None = None) -> list[dict]:
     return result
 
 
-def start_fetch(days: int | None = None) -> None:
+def start_fetch(start_date: str | None = None, end_date: str | None = None) -> None:
     """后台跑 daily.py，实现抓取。
 
-    days=None：现场抓取今天（--force）
-    days=N：从今天往前倒 N 天逐天抓取（含今天）
+    start_date/end_date 都为 None：现场抓取今天（--force）
+    有日期：抓取 [start_date, end_date] 闭区间（--start/--end）
     """
     global FETCH_STATE
     with FETCH_LOCK:
@@ -180,8 +180,8 @@ def start_fetch(days: int | None = None) -> None:
         FETCH_STATE.update(running=True, startedAt=now_iso(), finishedAt=None, output="", code=None)
 
     cmd = [str(PYTHON_EXE), str(DAILY_PY), "--force"]
-    if days is not None:
-        cmd += ["--days", str(days)]
+    if start_date and end_date:
+        cmd += ["--start", start_date, "--end", end_date]
 
     def worker():
         global FETCH_STATE
@@ -299,21 +299,23 @@ class Handler(BaseHTTPRequestHandler):
             start_fetch()
             json_response(self, {"started": True, "message": "现场抓取已启动"})
         elif path == "/api/fetch-custom":
-            # 读取 JSON body 中的 days 参数（往前倒多少天）
-            days = None
+            # 读取 JSON body 中的 start_date / end_date（YYYY-MM-DD）
+            start_date = None
+            end_date = None
             try:
                 length = int(self.headers.get("Content-Length") or 0)
                 if length > 0:
                     body = self.rfile.read(length).decode("utf-8")
                     payload = json.loads(body)
-                    days = int(payload.get("days", 0))
+                    start_date = (payload.get("start_date") or "").strip() or None
+                    end_date = (payload.get("end_date") or "").strip() or None
             except Exception:
-                days = None
-            if days is None:
-                self._send_error(400, "缺少 days 参数")
+                start_date = end_date = None
+            if not start_date or not end_date:
+                self._send_error(400, "缺少 start_date / end_date 参数")
                 return
-            start_fetch(days=days)
-            json_response(self, {"started": True, "message": f"自定义抓取已启动（往前 {days} 天）"})
+            start_fetch(start_date=start_date, end_date=end_date)
+            json_response(self, {"started": True, "message": f"自定义抓取已启动（{start_date} ~ {end_date}）"})
         else:
             self._send_error(404, "Not Found")
 
