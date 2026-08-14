@@ -45,10 +45,16 @@ h1 { font-size: 24px; border-bottom: 2px solid #1855a5; padding-bottom: 8px; }
 <h2>目录</h2>
 <ul>
 {% for grp in groups %}
-<li><b>{{ grp.category_label }}</b>（{{ grp.total }} 篇）{% if grp.accounts|length > 1 %} — {{ grp.accounts|join('、') }}{% endif %}
+<li><b>{{ grp.category_label }}</b>（{{ grp.total }} 篇）
 <ul>
-{% for a in grp.all_articles %}
+{% for sub in grp.sub_groups %}
+<li>{{ sub.account }}（{{ sub.articles|length }} 篇）
+<ul>
+{% for a in sub.articles %}
 <li><a href="#{{ a.anchor }}">{{ a.title }}</a>{% if a.title_zh %} <span style="color:#888;font-size:12px">{{ a.title_zh }}</span>{% endif %}</li>
+{% endfor %}
+</ul>
+</li>
 {% endfor %}
 </ul>
 </li>
@@ -59,7 +65,7 @@ h1 { font-size: 24px; border-bottom: 2px solid #1855a5; padding-bottom: 8px; }
 {% for grp in groups %}
 <div class="category-group">
 <div class="category-header">{{ grp.category_label }}</div>
-<div class="category-desc">{{ grp.accounts|join('、') }}</div>
+<div class="category-desc">共 {{ grp.sub_groups|length }} 个来源 · {{ grp.total }} 篇</div>
 {% for sub in grp.sub_groups %}
 <div class="account-group">
 <div class="account-name">{{ sub.account }}{% if sub.cat_tag %} <span class="cat-tag {{ sub.cls }}">{{ sub.cat_tag }}</span>{% endif %}</div>
