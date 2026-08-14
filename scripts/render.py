@@ -25,9 +25,10 @@ h1 { font-size: 24px; border-bottom: 2px solid #1855a5; padding-bottom: 8px; }
 .account-group { margin: 20px 0; }
 .account-name { font-size: 17px; color: #333; border-left: 3px solid #ccc; padding-left: 10px; margin-bottom: 12px; }
 .article { background: white; padding: 16px 20px; margin: 12px 0; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
-.article h3 { margin: 0 0 6px; font-size: 17px; }
+.article h3 { margin: 0 0 4px; font-size: 17px; }
 .article h3 a { color: #1855a5; text-decoration: none; }
-.article .subtitle { color: #666; font-size: 14px; margin-bottom: 8px; }
+.article .subtitle { color: #444; font-size: 15px; margin: 6px 0 10px; padding: 8px 12px; background: #f8f9fa; border-left: 3px solid #90c4a0; border-radius: 0 6px 6px 0; line-height: 1.6; }
+.article .subtitle::before { content: "— "; color: #90c4a0; font-weight: bold; margin-right: 4px; }
 .article .meta { color: #888; font-size: 12px; margin-bottom: 8px; }
 .cat-tag { display: inline-block; font-size: 11px; padding: 1px 8px; border-radius: 10px; color: white; }
 .cat-tag.mp { background: #e07020; }
@@ -238,7 +239,7 @@ def render_markdown(articles, target_date_str, group_by_account=True, sort_desc=
             for a in sub["articles"]:
                 lines.append(f"- **[{a['title']}]({a['url']})**\n")
                 if a.get("title_zh"):
-                    lines.append(f"  *{a['title_zh']}*\n")
+                    lines.append(f"  > — *{a['title_zh']}*\n")
                 if a.get("date_published"):
                     lines.append(f"  📅 {a['date_published']}\n")
                 summary = html_summary(a.get("content_html", ""), 200, fallback=a.get("title", ""))
