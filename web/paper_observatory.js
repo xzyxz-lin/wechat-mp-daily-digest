@@ -132,9 +132,6 @@
       <button class="nav-item is-active" data-view="dashboard" type="button">
         <svg><use href="#i-grid"/></svg><span>文件总控</span><b>HOME</b>
       </button>
-      <button class="nav-item" data-view="aggregate" type="button">
-        <svg><use href="#i-search"/></svg><span>论文总控</span><b>ALL</b>
-      </button>
       ${group("公众号", "公众号", pub)}
       ${group("期刊", "期刊", jour)}
       <button class="nav-item" data-view="fund" type="button">
@@ -193,8 +190,8 @@
   function renderDashboard(categories) {
     const pub = categories["公众号"] || { sources: 0, articles: 0, days: 0 };
     const jour = categories["期刊"] || { sources: 0, articles: 0, days: 0 };
-    const card = (icon, title, sub, stat, desc, extraCls) => `
-      <div class="dashboard-card ${extraCls || ""}">
+    const card = (icon, title, sub, stat, desc, extraCls, jumpCat) => `
+      <div class="dashboard-card ${extraCls || ""}" data-jump="${jumpCat || ""}">
         <div class="dashboard-card__head"><svg><use href="#${icon}"/></svg><span>${escapeHtml(sub)}</span></div>
         <h4>${escapeHtml(title)}</h4>
         <div class="dashboard-card__stats">
@@ -203,10 +200,11 @@
           <div><span>归档天数</span><strong>${stat.days}</strong></div>
         </div>
         <p class="dashboard-card__desc">${escapeHtml(desc)}</p>
+        <div class="dashboard-card__action">点击查看详情 →</div>
       </div>`;
     dashboardCards.innerHTML = `
-      ${card("i-paper", "公众号", "WECHAT MP", pub, "微信读书订阅的 5 个环境/膜领域公众号，每日推文按账号归档。")}
-      ${card("i-search", "期刊", "JOURNALS RSS", jour, "各出版商 RSS 直连抓取（Nature / arXiv / ScienceDirect / ACS 等），按期刊归档。")}
+      ${card("i-paper", "公众号", "WECHAT MP", pub, "微信读书订阅的 5 个环境/膜领域公众号，每日推文按账号归档。", "", "公众号")}
+      ${card("i-search", "期刊", "JOURNALS RSS", jour, "各出版商 RSS 直连抓取（Nature / arXiv / ScienceDirect / ACS 等），按期刊归档。", "", "期刊")}
       <div class="dashboard-card is-fund">
         <div class="dashboard-card__head"><svg><use href="#i-fund"/></svg><span>FUNDS · 规划中</span></div>
         <h4>基金</h4>
@@ -217,6 +215,28 @@
         </div>
         <p class="dashboard-card__desc">拟纳入基金申报通知与成熟/结题项目，待公众号、期刊两块稳定后设计。</p>
       </div>`;
+
+    // 卡片点击跳转：展开对应导航分组并高亮第一个子项
+    dashboardCards.querySelectorAll(".dashboard-card[data-jump]").forEach((cardEl) => {
+      cardEl.style.cursor = "pointer";
+      cardEl.addEventListener("click", () => {
+        const cat = cardEl.dataset.jump;
+        if (!cat) return;
+        // 展开对应导航分组
+        const group = navStack.querySelector(`.nav-group[data-group="${cat}"]`);
+        if (group) {
+          group.classList.remove("is-collapsed");
+          const header = group.querySelector(".nav-group__header");
+          if (header) header.setAttribute("aria-expanded", "true");
+          // 高亮分组标题
+          navStack.querySelectorAll(".nav-item").forEach((b) => b.classList.remove("is-active"));
+          header.classList.add("is-active");
+          // 点击第一个子项（打开第一个来源）
+          const firstSub = group.querySelector(".nav-sub");
+          if (firstSub) firstSub.click();
+        }
+      });
+    });
   }
 
   // ===== 页面切换 =====
@@ -229,12 +249,10 @@
     setActiveNav(view);
     const meta = {
       dashboard: ["PAPER MAP / 00", "论文观察台"],
-      aggregate: ["AGGREGATE / ALL", "论文总控"],
       fund: ["FUND / SOON", "基金模块"],
     }[view] || ["", ""];
     pageEyebrow.textContent = meta[0];
     pageTitle.textContent = meta[1];
-    if (view === "aggregate") { state.aggPage = 1; loadAggregate(state.currentCategory, 1); }
   }
 
   function setActiveNav(key) {

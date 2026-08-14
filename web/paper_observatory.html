@@ -36,7 +36,7 @@
       </div>
 
       <nav class="nav-stack" id="nav-stack" aria-label="导航">
-        <!-- 由 JS 渲染：文件总控 / 论文总控 / 公众号(分组) / 期刊(分组) / 基金 -->
+        <!-- 由 JS 渲染：文件总控 / 公众号(分组) / 期刊(分组) / 基金 -->
       </nav>
 
       <div class="sidebar-foot">
@@ -92,25 +92,6 @@
         <div class="metric-strip" id="metric-strip"></div>
         <div class="section-heading"><div><span>FILE CONTROL</span><h3>文件总控 · 信息源概览</h3></div><p>公众号、期刊、基金三类信息源的状态一览。</p></div>
         <div class="dashboard-cards" id="dashboard-cards"></div>
-      </section>
-
-      <!-- 论文总控（聚合） -->
-      <section class="page" data-view="aggregate" aria-labelledby="page-title">
-        <div class="section-intro">
-          <div><span id="aggregate-kicker">AGGREGATE</span><h3 id="aggregate-page-title">论文总控</h3></div>
-          <p>聚合所有来源的最新论文，可按分类筛选。</p>
-        </div>
-        <div class="filter-chips" id="filter-chips">
-          <button class="chip is-active" data-cat="">全部</button>
-          <button class="chip" data-cat="公众号">公众号</button>
-          <button class="chip" data-cat="期刊">期刊</button>
-        </div>
-        <div class="date-timeline" id="aggregate-articles"></div>
-        <div class="pagination" id="aggregate-pagination">
-          <button type="button" id="agg-page-prev">上一页</button>
-          <span id="agg-page-info">1 / 1</span>
-          <button type="button" id="agg-page-next">下一页</button>
-        </div>
       </section>
 
       <!-- 单来源归档 -->
