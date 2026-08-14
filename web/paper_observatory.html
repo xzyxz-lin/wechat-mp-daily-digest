@@ -108,18 +108,20 @@
         </div>
       </section>
 
-      <!-- 基金（占位） -->
+      <!-- 基金（国自然结题 + 成果论文） -->
       <section class="page" data-view="fund" aria-labelledby="page-title">
-        <div class="fund-placeholder">
-          <svg class="fund-placeholder__icon"><use href="#i-fund"/></svg>
-          <h3>基金模块 · 规划中</h3>
-          <p>计划纳入两类信息：</p>
-          <ul>
-            <li><b>基金申报通知</b>——各类基金（国自然等）的申报指南、截止日期提醒。</li>
-            <li><b>结题 / 成熟项目</b>——已结题或成熟运转的基金项目，跟踪其产出与方向。</li>
-          </ul>
-          <p class="fund-placeholder__hint">数据源与接入方式将在公众号、期刊两块稳定后设计，本期仅占位。</p>
+        <div class="section-intro">
+          <div><span id="fund-kicker">FUND / NSFC</span><h3 id="fund-page-title">国自然基金观察</h3></div>
+          <p id="fund-desc">结题项目 + 成果论文，数据源：国家自然科学基金大数据知识管理服务门户。</p>
         </div>
+        <div class="fund-toolbar" id="fund-toolbar">
+          <div class="fund-filters" id="fund-filters"></div>
+          <div class="fund-search">
+            <svg><use href="#i-search"/></svg>
+            <input type="search" id="fund-search-input" placeholder="搜索项目名 / 负责人 / 单位 / 代码" aria-label="搜索基金">
+          </div>
+        </div>
+        <div class="fund-list" id="fund-list"></div>
       </section>
     </main>
   </div>
@@ -145,6 +147,31 @@
   </aside>
 
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <!-- 基金详情抽屉 -->
+  <div class="drawer-backdrop" id="fund-drawer-backdrop" hidden></div>
+  <aside class="detail-drawer" id="fund-drawer" aria-hidden="true" aria-label="基金项目详情">
+    <header class="drawer-header">
+      <div><span id="fund-drawer-kicker">FUND / DETAIL</span><h2 id="fund-drawer-title">基金项目</h2><p id="fund-drawer-purpose"></p></div>
+      <button class="icon-button" id="fund-drawer-close" type="button" aria-label="关闭详情"><svg><use href="#i-close"/></svg></button>
+    </header>
+    <div class="drawer-body">
+      <div class="drawer-stats" id="fund-drawer-stats"></div>
+      <div class="article-full">
+        <h3 id="fund-drawer-name">项目名称</h3>
+        <div class="article-meta" id="fund-drawer-meta"></div>
+        <p class="article-summary" id="fund-drawer-abstract"></p>
+        <div class="fund-papers">
+          <div class="fund-papers__head">成果论文 <b id="fund-paper-count">0</b> 篇</div>
+          <ul id="fund-paper-list"></ul>
+        </div>
+        <a class="article-open" id="fund-drawer-portal" href="https://kd.nsfc.cn/" target="_blank" rel="noopener">
+          <svg><use href="#i-link"/></svg><span>在国自然门户查看</span>
+        </a>
+      </div>
+    </div>
+  </aside>
+
   <script src="/paper_observatory.js" defer></script>
 </body>
 </html>

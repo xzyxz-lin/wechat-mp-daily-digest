@@ -36,6 +36,7 @@ JOURNALS_CONFIG_PATH = PROJECT_DIR / "config" / "journals.json"
 SCRIPTS_DIR = PROJECT_DIR / "scripts"
 PYTHON_EXE = SCRIPTS_DIR / ".venv" / "Scripts" / "python.exe"
 DAILY_PY = SCRIPTS_DIR / "daily.py"
+FUNDS_PATH = PROJECT_DIR / "data" / "funds.json"
 
 _config: dict = {}
 ARCHIVE_DIR: Path = Path(".")
@@ -213,6 +214,41 @@ def fetch_articles(account: str | None = None, category: str | None = None,
     }
 
 
+def load_funds(q: str | None = None, kw: str | None = None, cat: str | None = None) -> dict:
+    """读取 data/funds.json（fetch_funds.py 产出），支持按关键词/分类/全文检索过滤。"""
+    if not FUNDS_PATH.exists():
+        return {"funds": [], "generated_at": None, "completion_count": 0,
+                "support_count": 0, "support_note": "", "keywords": [], "total": 0, "papers_total": 0}
+    try:
+        with open(FUNDS_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        return {"funds": [], "generated_at": None, "completion_count": 0,
+                "support_count": 0, "support_note": "", "keywords": [], "total": 0, "papers_total": 0}
+    funds = data.get("funds", [])
+    if cat:
+        funds = [x for x in funds if x.get("category") == cat]
+    if kw:
+        funds = [x for x in funds if kw in (x.get("hit_keywords") or [])]
+    if q:
+        q = q.lower()
+        funds = [x for x in funds if q in (
+            x.get("project_name", "") + x.get("keywords", "") + x.get("project_admin", "")
+            + x.get("depend_unit", "") + x.get("code", "")
+        ).lower()]
+    return {
+        "funds": funds,
+        "generated_at": data.get("generated_at"),
+        "source": data.get("source"),
+        "completion_count": data.get("completion_count", 0),
+        "support_count": data.get("support_count", 0),
+        "support_note": data.get("support_note", ""),
+        "keywords": sorted({k for x in data.get("funds", []) for k in x.get("hit_keywords", [])}),
+        "total": len(funds),
+        "papers_total": sum(len(x.get("papers", [])) for x in data.get("funds", [])),
+    }
+
+
 def fetch_dates(account: str | None = None) -> list[dict]:
     """返回按日期分组的文章数（供历史浏览）。"""
     archive = scan_archive()
@@ -365,6 +401,12 @@ class Handler(BaseHTTPRequestHandler):
                 reload_paths()
                 account = (qs.get("account") or [None])[0]
                 json_response(self, {"dates": fetch_dates(account)})
+            elif path == "/api/funds":
+                reload_paths()
+                q = (qs.get("q") or [None])[0]
+                kw = (qs.get("kw") or [None])[0]
+                cat = (qs.get("cat") or [None])[0]
+                json_response(self, load_funds(q, kw, cat))
             elif path == "/api/fetch/status":
                 json_response(self, FETCH_STATE)
             else:

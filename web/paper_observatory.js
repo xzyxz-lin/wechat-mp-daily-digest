@@ -12,6 +12,10 @@
     accounts: [],
     categories: {},
     fetchPolling: null,
+    fundKeywords: [],
+    fundData: null,
+    fundKw: "",
+    fundQ: "",
   };
 
   const $ = (sel) => document.querySelector(sel);
@@ -104,6 +108,12 @@
       renderTopology(state.accounts);
       renderDashboard(state.categories);
       snapshotTime.textContent = new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
+      // 拉取基金统计，填充总控卡片 + 导航计数
+      try {
+        const funds = await fetchJSON("/api/funds");
+        state.fundKeywords = funds.keywords || [];
+        updateFundDashboard(funds);
+      } catch (e) { /* 无基金数据时不报错 */ }
     } catch (e) {
       showToast("加载总览失败：" + e.message, true);
     }
@@ -134,7 +144,7 @@
       ${group("公众号", "公众号", pub)}
       ${group("期刊", "期刊", jour)}
       <button class="nav-item" data-view="fund" type="button">
-        <svg><use href="#i-fund"/></svg><span>基金</span><b>SOON</b>
+        <svg><use href="#i-fund"/></svg><span>基金</span><b id="nav-fund-count"></b>
       </button>`;
 
     navStack.querySelectorAll(".nav-group__header").forEach((h) => {
@@ -204,15 +214,16 @@
     dashboardCards.innerHTML = `
       ${card("i-paper", "公众号", "WECHAT MP", pub, "微信读书订阅的 5 个环境/膜领域公众号，每日推文按账号归档。", "", "公众号")}
       ${card("i-search", "期刊", "JOURNALS RSS", jour, "各出版商 RSS 直连抓取（Nature / arXiv / ScienceDirect / ACS 等），按期刊归档。", "", "期刊")}
-      <div class="dashboard-card is-fund">
-        <div class="dashboard-card__head"><svg><use href="#i-fund"/></svg><span>FUNDS · 规划中</span></div>
-        <h4>基金</h4>
+      <div class="dashboard-card is-fund" data-jump="基金">
+        <div class="dashboard-card__head"><svg><use href="#i-fund"/></svg><span>FUNDS · 国自然</span></div>
+        <h4>基金（结题 + 论文）</h4>
         <div class="dashboard-card__stats">
-          <div><span>申报通知</span><strong>—</strong></div>
-          <div><span>结题项目</span><strong>—</strong></div>
-          <div><span>状态</span><strong>占位</strong></div>
+          <div><span>结题项目</span><strong id="fund-card-projects">—</strong></div>
+          <div><span>成果论文</span><strong id="fund-card-papers">—</strong></div>
+          <div><span>关键词</span><strong>${state.fundKeywords ? state.fundKeywords.length : 0}</strong></div>
         </div>
-        <p class="dashboard-card__desc">拟纳入基金申报通知与成熟/结题项目，待公众号、期刊两块稳定后设计。</p>
+        <p class="dashboard-card__desc">国自然结题项目 + 其成果论文，按膜/反渗透/膜污染清洗/CFD 等方向精筛。手动抓取（fetch_funds.py）。</p>
+        <div class="dashboard-card__action">点击查看详情 →</div>
       </div>`;
 
     // 卡片点击跳转：展开对应导航分组并高亮第一个子项
@@ -221,6 +232,7 @@
       cardEl.addEventListener("click", () => {
         const cat = cardEl.dataset.jump;
         if (!cat) return;
+        if (cat === "基金") { showView("fund"); return; }
         // 展开对应导航分组
         const group = navStack.querySelector(`.nav-group[data-group="${cat}"]`);
         if (group) {
@@ -239,6 +251,7 @@
   }
 
   // ===== 页面切换 =====
+  let _fundLoaded = false;
   function showView(view) {
     state.view = view;
     state.currentAccount = null;
@@ -248,10 +261,13 @@
     setActiveNav(view);
     const meta = {
       dashboard: ["PAPER MAP / 00", "论文观察台"],
-      fund: ["FUND / SOON", "基金模块"],
+      fund: ["FUND / NSFC", "国自然基金观察"],
     }[view] || ["", ""];
     pageEyebrow.textContent = meta[0];
     pageTitle.textContent = meta[1];
+    if (view === "fund") {
+      loadFunds(state.fundKw, state.fundQ);
+    }
   }
 
   function setActiveNav(key) {
@@ -393,6 +409,137 @@
   $("#drawer-close").addEventListener("click", closeDrawer);
   drawerBackdrop.addEventListener("click", closeDrawer);
   document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeDrawer(); });
+
+  // ===== 基金模块 =====
+  function updateFundDashboard(funds) {
+    const pc = document.getElementById("fund-card-projects");
+    const pp = document.getElementById("fund-card-papers");
+    const navc = document.getElementById("nav-fund-count");
+    if (pc) pc.textContent = funds.completion_count || 0;
+    if (pp) pp.textContent = funds.papers_total || 0;
+    if (navc) navc.textContent = funds.total || 0;
+  }
+
+  const fundList = $("#fund-list");
+  const fundFilters = $("#fund-filters");
+  const fundSearchInput = $("#fund-search-input");
+
+  async function loadFunds(kw, q) {
+    state.fundKw = kw || "";
+    state.fundQ = q || "";
+    let url = "/api/funds";
+    const params = [];
+    if (kw) params.push("kw=" + encodeURIComponent(kw));
+    if (q) params.push("q=" + encodeURIComponent(q));
+    if (params.length) url += "?" + params.join("&");
+    try {
+      const data = await fetchJSON(url);
+      state.fundData = data;
+      renderFundFilters(data.keywords || [], kw);
+      renderFundList(data.funds || [], data);
+    } catch (e) {
+      fundList.innerHTML = `<div class="empty empty--large"><p>加载基金数据失败</p><p class="empty-hint">${escapeHtml(e.message)}</p><p class="empty-hint">请先运行 scripts/fetch_funds.py 抓取国自然结题数据。</p></div>`;
+    }
+  }
+
+  function renderFundFilters(keywords, activeKw) {
+    const chips = [`<button class="chip ${!activeKw ? "is-active" : ""}" data-kw="">全部</button>`]
+      .concat(keywords.map((k) => `<button class="chip ${k === activeKw ? "is-active" : ""}" data-kw="${escapeHtml(k)}">${escapeHtml(k)}</button>`));
+    fundFilters.innerHTML = chips.join("");
+    fundFilters.querySelectorAll(".chip").forEach((c) => {
+      c.addEventListener("click", () => loadFunds(c.dataset.kw || "", state.fundQ));
+    });
+  }
+
+  function renderFundList(funds, data) {
+    if (!funds.length) {
+      fundList.innerHTML = `<div class="empty empty--large"><p>当前筛选条件下暂无基金数据</p><p class="empty-hint">可切换关键词或清空搜索；如从未抓取，请运行 fetch_funds.py。</p></div>`;
+      return;
+    }
+    const note = data && data.support_note
+      ? `<p class="fund-note">${escapeHtml(data.support_note)}</p>` : "";
+    const srcLine = data && data.source
+      ? `<p class="fund-source">数据源：${escapeHtml(data.source)} ｜ 生成时间：${escapeHtml((data.generated_at || "").slice(0, 19).replace("T", " "))}</p>` : "";
+    fundList.innerHTML = note + srcLine + funds.map((f) => `
+      <div class="fund-row" data-fund='${escapeHtml(JSON.stringify(f))}'>
+        <div class="fund-row__main">
+          <h4>${escapeHtml(f.project_name || "（无标题）")}</h4>
+          <p class="fund-row__meta">
+            <span>${escapeHtml(f.project_type || "")}</span>
+            <span>${escapeHtml(f.project_admin || "")} · ${escapeHtml(f.depend_unit || "")}</span>
+            <span>批准号 ${escapeHtml(f.ratify_no || "")}</span>
+            <span>${escapeHtml(f.ratify_year || "")}→结题 ${escapeHtml(f.conclusion_year || "")}</span>
+            <span>${escapeHtml(f.support_num || "")} 万</span>
+          </p>
+          <p class="fund-row__kw">${escapeHtml(f.keywords || f.keywords_c || "")}</p>
+        </div>
+        <div class="fund-row__stat">
+          <span class="fund-row__papers">${Array.isArray(f.papers) ? f.papers.length : (f.paper_count || 0)}<small>篇论文</small></span>
+        </div>
+        <div class="article-row__arrow"><svg><use href="#i-arrow"/></svg></div>
+      </div>`).join("");
+    fundList.querySelectorAll(".fund-row").forEach((row) => {
+      row.addEventListener("click", () => {
+        try { openFundDrawer(JSON.parse(row.dataset.fund)); }
+        catch (e) { showToast("打开详情失败", true); }
+      });
+    });
+  }
+
+  // 基金详情抽屉
+  const fundDrawer = $("#fund-drawer");
+  const fundDrawerBackdrop = $("#fund-drawer-backdrop");
+
+  function openFundDrawer(fund) {
+    $("#fund-drawer-title").textContent = fund.project_type || "基金项目";
+    $("#fund-drawer-purpose").textContent = (fund.ratify_no || "") + (fund.conclusion_year ? ` · ${fund.conclusion_year} 结题` : "");
+    $("#fund-drawer-stats").innerHTML = `
+      <div class="drawer-stat"><span>负责人</span><strong>${escapeHtml(fund.project_admin || "—")}</strong></div>
+      <div class="drawer-stat"><span>依托单位</span><strong>${escapeHtml(fund.depend_unit || "—")}</strong></div>
+      <div class="drawer-stat"><span>批准年度</span><strong>${escapeHtml(fund.ratify_year || "—")}</strong></div>
+      <div class="drawer-stat"><span>金额</span><strong>${escapeHtml(fund.support_num || "—")} 万</strong></div>
+      <div class="drawer-stat"><span>申请代码</span><strong>${escapeHtml(fund.code || "—")}</strong></div>`;
+    $("#fund-drawer-name").textContent = fund.project_name || "";
+    $("#fund-drawer-meta").innerHTML = `
+      <span><svg><use href="#i-paper"/></svg>${escapeHtml(fund.project_type || "")}</span>
+      <span><svg><use href="#i-calendar"/></svg>结题 ${escapeHtml(fund.conclusion_year || "—")}</span>
+      <span><svg><use href="#i-clock"/></svg>研究周期 ${escapeHtml(fund.research_scope || "—")}</span>`;
+    $("#fund-drawer-abstract").textContent = fund.abstract_c || fund.conclusion_abstract || "（无摘要）";
+    const papers = fund.papers || [];
+    $("#fund-paper-count").textContent = papers.length;
+    $("#fund-paper-list").innerHTML = papers.length
+      ? papers.map((p) => `
+        <li>
+          <span class="ptype">${escapeHtml(p.type || "成果")}</span>
+          <span class="ptitle">${escapeHtml(p.title || "")}</span>
+          <span class="pauthors">${escapeHtml(p.authors || "")}</span>
+        </li>`).join("")
+      : `<li class="empty-hint">该项目未列出成果论文</li>`;
+    fundDrawer.classList.add("is-open");
+    fundDrawer.setAttribute("aria-hidden", "false");
+    fundDrawerBackdrop.hidden = false;
+    requestAnimationFrame(() => fundDrawerBackdrop.classList.add("is-open"));
+  }
+
+  function closeFundDrawer() {
+    fundDrawer.classList.remove("is-open");
+    fundDrawer.setAttribute("aria-hidden", "true");
+    fundDrawerBackdrop.classList.remove("is-open");
+    setTimeout(() => { fundDrawerBackdrop.hidden = true; }, 260);
+  }
+  $("#fund-drawer-close").addEventListener("click", closeFundDrawer);
+  fundDrawerBackdrop.addEventListener("click", closeFundDrawer);
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeFundDrawer(); });
+
+  // 基金搜索（防抖）
+  let fundSearchTimer = null;
+  fundSearchInput.addEventListener("input", () => {
+    clearTimeout(fundSearchTimer);
+    const v = fundSearchInput.value.trim();
+    fundSearchTimer = setTimeout(() => loadFunds(state.fundKw, v), 300);
+  });
+
+  // 进入基金视图时加载列表（防抖避免重复请求）
 
   // ===== 现场抓取 =====
   async function triggerFetch() {
