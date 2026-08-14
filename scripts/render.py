@@ -72,7 +72,6 @@ h1 { font-size: 23px; border-bottom: 2px solid #1855a5; padding-bottom: 8px; mar
 <h1>{{ title }}</h1>
 {% if groups %}
 <div class="toc">
-<h2>📋 目录</h2>
 <ul>
 {% for grp in groups %}
 <li><b>{{ grp.category_label }}</b><span class="cat-badge {{ grp.cls }}">{{ grp.total }} 篇</span>
