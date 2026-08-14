@@ -287,7 +287,7 @@
             <div class="article-row__time">${formatTime(a.date_published)}</div>
             <div class="article-row__main">
               <h4>${escapeHtml(a.title)}</h4>
-              <p>${escapeHtml((a.summary || a.title || ""))}</p>
+              <p class="article-row__subtitle">${escapeHtml(a.title_zh || a.summary || "")}</p>
             </div>
             <span class="cat-badge ${catClass(a.category)}">${escapeHtml(a.category || "公众号")}</span>
             <div class="article-row__arrow"><svg><use href="#i-arrow"/></svg></div>
@@ -351,6 +351,8 @@
       <div class="drawer-stat"><span>分类</span><strong>${escapeHtml(article.category || "公众号")}</strong></div>
       <div class="drawer-stat"><span>发布时间</span><strong>${formatTime(article.date_published) || "—"}</strong></div>`;
     $("#article-full-title").textContent = article.title || "";
+    $("#article-full-subtitle").textContent = article.title_zh || "";
+    $("#article-full-subtitle").style.display = article.title_zh ? "" : "none";
     $("#article-full-meta").innerHTML = `
       <span><svg><use href="#i-clock"/></svg>${escapeHtml(article.date_published || "")}</span>
       <span><svg><use href="#i-calendar"/></svg>${escapeHtml(article.date || "")}</span>

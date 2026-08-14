@@ -4,28 +4,10 @@
   "proxy": null,
   "journals": [
     {
-      "name": "Journal of Membrane Science",
-      "rss": "https://www.sciencedirect.com/journal/journal-of-membrane-science/rss",
-      "publisher": "ScienceDirect",
-      "note": "本机网络被出版商拦截(403)，需在可访问网络/配置 proxy 后自动解锁"
-    },
-    {
-      "name": "Water Research",
-      "rss": "https://www.sciencedirect.com/journal/water-research/rss",
-      "publisher": "ScienceDirect",
-      "note": "本机网络被出版商拦截(403)"
-    },
-    {
-      "name": "Environmental Science & Technology",
-      "rss": "https://pubs.acs.org/journal/esthag/rss",
-      "publisher": "ACS",
-      "note": "本机网络被出版商拦截(000/超时)"
-    },
-    {
-      "name": "Nature Water",
-      "rss": "https://www.nature.com/subjects/water.rss",
+      "name": "Nature",
+      "rss": "https://www.nature.com/nature.rss",
       "publisher": "Nature",
-      "note": "使用 Nature 水领域主题 RSS（ Nature Water 期刊独立 RSS 在本环境 404）"
+      "note": "正刊 RSS（Atom 格式），稳定可抓"
     },
     {
       "name": "Nature Communications",
@@ -34,10 +16,28 @@
       "note": "稳定可抓"
     },
     {
-      "name": "Nature",
-      "rss": "https://www.nature.com/nature.rss",
+      "name": "Nature Water",
+      "rss": "https://www.nature.com/subjects/water.rss",
       "publisher": "Nature",
-      "note": "正刊 RSS（Atom 格式）"
+      "note": "使用 Nature 水领域主题 RSS（Nature Water 期刊独立 RSS 在本环境 404）"
+    },
+    {
+      "name": "Environmental Science & Technology",
+      "rss": "https://pubs.acs.org/journal/esthag/rss",
+      "publisher": "ACS",
+      "note": "本机网络被出版商拦截(000/超时)"
+    },
+    {
+      "name": "Water Research",
+      "rss": "https://www.sciencedirect.com/journal/water-research/rss",
+      "publisher": "ScienceDirect",
+      "note": "本机网络被出版商拦截(403)"
+    },
+    {
+      "name": "Journal of Membrane Science",
+      "rss": "https://www.sciencedirect.com/journal/journal-of-membrane-science/rss",
+      "publisher": "ScienceDirect",
+      "note": "本机网络被出版商拦截(403)，需在可访问网络/配置 proxy 后自动解锁"
     },
     {
       "name": "Desalination",

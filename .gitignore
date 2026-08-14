@@ -10,6 +10,8 @@ env/
 
 # 配置（包含敏感信息）
 config/config.json
+config/.translation_cache.json
+scripts/.translation_cache.json
 
 # 环境变量
 .env

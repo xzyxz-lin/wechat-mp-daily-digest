@@ -133,7 +133,9 @@ def get_accounts() -> list[dict]:
             counts[name]["category"] = cat
 
     result = []
-    for name, src in sources.items():
+    # 公众号按白名单顺序
+    for idx, name in enumerate(whitelist_map):
+        src = sources[name]
         c = counts.get(name, {"article_count": 0, "dates": set(), "category": src["category"]})
         dates = sorted(c["dates"], key=_date_key, reverse=True)
         result.append({
@@ -144,7 +146,24 @@ def get_accounts() -> list[dict]:
             "last_date": dates[0] if dates else None,
             "dates": dates,
             "configured": True,
+            "_order": idx,
         })
+    # 期刊按 journals.json 配置顺序
+    for idx, j in enumerate(journals):
+        name = j["name"]
+        if name in sources and name not in {r["name"] for r in result}:
+            c = counts.get(name, {"article_count": 0, "dates": set(), "category": "期刊"})
+            dates = sorted(c["dates"], key=_date_key, reverse=True)
+            result.append({
+                "name": name,
+                "category": c["category"],
+                "article_count": c["article_count"],
+                "day_count": len(dates),
+                "last_date": dates[0] if dates else None,
+                "dates": dates,
+                "configured": True,
+                "_order": idx + 1000,  # 期刊在公众号之后
+            })
     # 存档中但不在配置里的（未知源），也列出
     for name, c in counts.items():
         if name not in sources:
@@ -154,10 +173,11 @@ def get_accounts() -> list[dict]:
                 "article_count": c["article_count"], "day_count": len(dates),
                 "last_date": dates[0] if dates else None, "dates": dates,
                 "configured": False,
+                "_order": 9999,
             })
 
     cat_order = {"公众号": 0, "期刊": 1, "基金": 2}
-    result.sort(key=lambda x: (cat_order.get(x["category"], 9), not x["configured"], -x["article_count"], x["name"]))
+    result.sort(key=lambda x: (cat_order.get(x["category"], 9), x.get("_order", 9999)))
     return result
 
 

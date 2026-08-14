@@ -41,5 +41,6 @@
     "include_full_text": false,
     "max_summary_chars": 200,
     "include_toc": true
-  }
+  },
+  "journals_proxy": ""
 }

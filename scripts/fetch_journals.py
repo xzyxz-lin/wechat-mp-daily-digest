@@ -201,7 +201,10 @@ def fetch_one(journal, target_date, proxy=None, timeout=25):
 
 
 def fetch_daily(config, target_date=None):
-    """主入口：抓取所有期刊，返回 target_date(北京) 当天发布的文章列表。"""
+    """主入口：抓取所有期刊，返回 target_date(北京) 当天发布的文章列表。
+
+    每篇文章附带 title_zh（中文翻译标题），翻译失败时保留原文。
+    """
     target_date = target_date or date.today()
     journals = load_journals()
     if not journals:
@@ -213,6 +216,21 @@ def fetch_daily(config, target_date=None):
     for j in journals:
         result.extend(fetch_one(j, target_date, proxy=proxy))
         time.sleep(0.3)  # 礼貌性限速，避免被封
+
+    # 批量翻译标题
+    if result:
+        try:
+            from translator import translate_batch
+            titles = [a["title"] for a in result if a.get("title")]
+            zh_map = translate_batch(titles)
+            for a in result:
+                a["title_zh"] = zh_map.get(a["title"], a["title"])
+            print(f"[journals] 翻译完成：{len(zh_map)} 条标题")
+        except Exception as e:
+            print(f"[journals] 翻译失败（不影响抓取）: {e}")
+            for a in result:
+                a["title_zh"] = a.get("title", "")
+
     print(f"[journals] 当天期刊论文合计 {len(result)} 篇")
     return result
 

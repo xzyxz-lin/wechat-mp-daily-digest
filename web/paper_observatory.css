@@ -188,6 +188,7 @@ svg { width: 1.25rem; height: 1.25rem; fill: none; stroke: currentColor; stroke-
 .article-row__main { flex: 1; min-width: 0; }
 .article-row__main h4 { margin: 0 0 3px; font: 520 1rem/1.4 var(--font-display); }
 .article-row__main p { margin: 0; color: var(--ink-700); font-size: .76rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.article-row__subtitle { margin: 0; color: var(--ink-500); font-size: .75rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .article-row__arrow { flex: none; color: var(--paper-300); }
 .article-row:hover .article-row__arrow { color: var(--oxide-600); }
 
@@ -213,7 +214,8 @@ svg { width: 1.25rem; height: 1.25rem; fill: none; stroke: currentColor; stroke-
 .drawer-stat { padding: 14px; background: var(--white); border: 1px solid var(--paper-200); border-radius: 3px; }
 .drawer-stat span { display: block; color: var(--ink-700); font-size: .66rem; }
 .drawer-stat strong { display: block; margin-top: 4px; font: 600 1.1rem var(--font-data); font-variant-numeric: tabular-nums; }
-.article-full h3 { margin: 0 0 12px; font: 520 1.35rem/1.4 var(--font-display); }
+.article-full h3 { margin: 0 0 4px; font: 520 1.35rem/1.4 var(--font-display); }
+.article-subtitle { margin: 0 0 12px; color: var(--ink-500); font-size: .9rem; line-height: 1.5; }
 .article-meta { display: flex; flex-wrap: wrap; gap: 8px 16px; margin-bottom: 18px; color: var(--ink-700); font-size: .74rem; }
 .article-meta span { display: inline-flex; align-items: center; gap: 5px; }
 .article-meta svg { width: 15px; height: 15px; color: var(--oxide-600); }

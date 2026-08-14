@@ -146,7 +146,33 @@ def fetch_daily(config, target_date=None):
         filtered = [it for it in filtered if get_account(it) in whitelist]
         print(f"[fetch] 公众号白名单过滤后: {len(filtered)} 篇 (白名单: {whitelist})")
 
-    return [normalize_item(it, whitelist_map.get(get_account(it), "公众号")) for it in filtered]
+    result = [normalize_item(it, whitelist_map.get(get_account(it), "公众号")) for it in filtered]
+
+    # 批量翻译标题
+    translate_articles(result)
+
+    return result
+
+
+def translate_articles(articles):
+    """对文章列表批量翻译标题，写入 title_zh 字段。
+
+    翻译失败不影响主流程（title_zh 回退为原文）。
+    公众号文章标题本身可能是中文，translator 会自动跳过。
+    """
+    if not articles:
+        return
+    try:
+        from translator import translate_batch
+        titles = [a["title"] for a in articles if a.get("title")]
+        zh_map = translate_batch(titles)
+        for a in articles:
+            a["title_zh"] = zh_map.get(a["title"], a["title"])
+        print(f"[fetch] 公众号标题翻译完成：{len(zh_map)} 条")
+    except Exception as e:
+        print(f"[fetch] 标题翻译失败（不影响抓取）: {e}")
+        for a in articles:
+            a["title_zh"] = a.get("title", "")
 
 
 if __name__ == "__main__":
