@@ -21,6 +21,7 @@ API：
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import subprocess
 import threading
@@ -39,6 +40,9 @@ SCRIPTS_DIR = PROJECT_DIR / "scripts"
 PYTHON_EXE = SCRIPTS_DIR / ".venv" / "Scripts" / "python.exe"
 DAILY_PY = SCRIPTS_DIR / "daily.py"
 FUNDS_PATH = PROJECT_DIR / "data" / "funds.json"
+DELETED_PATH = PROJECT_DIR / "data" / "deleted.json"
+SNAPSHOTS_PATH = PROJECT_DIR / "data" / "snapshots.json"
+DELETION_AUDIT_PATH = PROJECT_DIR / "data" / "deletion_audit.json"
 
 _config: dict = {}
 ARCHIVE_DIR: Path = Path(".")
@@ -75,10 +79,24 @@ FETCH_STATE: dict = {
 }
 FETCH_LOCK = threading.Lock()
 
+# 基金抓取状态（独立于论文抓取）
+FUNDS_FETCH_STATE: dict = {
+    "running": False,
+    "startedAt": None,
+    "finishedAt": None,
+    "output": "",
+    "code": None,
+}
+FUNDS_FETCH_LOCK = threading.Lock()
+
 
 def scan_archive() -> dict:
-    """扫描存档目录，返回 {date_str: [articles]}（日期倒序）。"""
+    """扫描存档目录，返回 {date_str: [articles]}（日期倒序）。
+
+    每篇文章附加稳定 id（article_uid），并过滤掉已标记删除的文章。
+    """
     result: dict = {}
+    deleted = set(load_deleted().get("articles", []))
     if not ARCHIVE_DIR.is_dir():
         return result
     for day_dir in ARCHIVE_DIR.iterdir():
@@ -87,10 +105,18 @@ def scan_archive() -> dict:
         jp = day_dir / "articles.json"
         if jp.exists():
             try:
-                with open(jp, "r", encoding="utf-8") as f:
-                    result[day_dir.name] = json.load(f)
+                arts = json.load(open(jp, "r", encoding="utf-8"))
             except Exception:
-                result[day_dir.name] = []
+                arts = []
+            kept = []
+            for a in arts:
+                a = dict(a)
+                uid = article_uid(a)
+                a["id"] = uid
+                if uid in deleted:
+                    continue
+                kept.append(a)
+            result[day_dir.name] = kept
     return dict(sorted(result.items(), key=lambda kv: _date_key(kv[0]), reverse=True))
 
 
@@ -100,6 +126,223 @@ def _date_key(date_str: str) -> str:
     if len(parts) == 3:
         return f"{int(parts[0]):04d}-{int(parts[1]):02d}-{int(parts[2]):02d}"
     return date_str
+
+
+# ===== 删除索引（标记删除，非物理删除，可恢复）=====
+def load_deleted() -> dict:
+    if not DELETED_PATH.exists():
+        return {"articles": [], "funds": []}
+    try:
+        with open(DELETED_PATH, "r", encoding="utf-8") as f:
+            d = json.load(f)
+        d.setdefault("articles", [])
+        d.setdefault("funds", [])
+        return d
+    except Exception:
+        return {"articles": [], "funds": []}
+
+
+def save_deleted(d: dict) -> None:
+    try:
+        with open(DELETED_PATH, "w", encoding="utf-8") as f:
+            json.dump(d, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+
+# ===== 删除对账（保留删除操作记录，不影响可恢复的删除索引）=====
+def load_deletion_audit() -> dict:
+    if not DELETION_AUDIT_PATH.exists():
+        return {}
+    try:
+        with open(DELETION_AUDIT_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def save_deletion_audit(audit: dict) -> None:
+    try:
+        with open(DELETION_AUDIT_PATH, "w", encoding="utf-8") as f:
+            json.dump(audit, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+
+def record_deletions(kind: str, ids: list, records: list | None = None) -> None:
+    """记录本次新标记删除的项目，供每日拉取/删除对账使用。"""
+    if not ids:
+        return
+    records_by_id = {
+        str(item.get("id")): item for item in (records or [])
+        if isinstance(item, dict) and item.get("id")
+    }
+    audit = load_deletion_audit()
+    today = _today_str()
+    day = audit.setdefault(today, {"date": today, "events": []})
+    events = day.setdefault("events", [])
+    timestamp = now_iso()
+    for item_id in ids:
+        source = records_by_id.get(str(item_id), {})
+        event = {
+            "id": str(item_id),
+            "kind": kind,
+            "deleted_at": timestamp,
+        }
+        if kind == "article":
+            event.update({
+                "title": str(source.get("title") or "未命名文章"),
+                "category": str(source.get("category") or "公众号"),
+                "account": str(source.get("account") or "未知来源"),
+                "archive_date": str(source.get("archive_date") or ""),
+            })
+        else:
+            event.update({
+                "title": str(source.get("project_name") or "未命名基金项目"),
+                "category": "基金",
+            })
+        events.append(event)
+    day["updated_at"] = timestamp
+    save_deletion_audit(audit)
+
+
+def deletion_audit_summary(target_date: str | None = None) -> dict:
+    """返回指定操作日的删除统计；日期为空时取今天。"""
+    target_date = target_date or _today_str()
+    day = load_deletion_audit().get(target_date, {})
+    events = day.get("events", []) if isinstance(day, dict) else []
+    events = [event for event in events if isinstance(event, dict)]
+    article_events = [event for event in events if event.get("kind") == "article"]
+    fund_events = [event for event in events if event.get("kind") == "fund"]
+    same_archive_day = [event for event in article_events if event.get("archive_date") == target_date]
+    return {
+        "date": target_date,
+        "total": len(events),
+        "article_count": len(article_events),
+        "fund_count": len(fund_events),
+        "same_archive_article_count": len(same_archive_day),
+        "recent": list(reversed(events[-8:])),
+        "updated_at": day.get("updated_at") if isinstance(day, dict) else None,
+    }
+
+
+# ===== 每日快照（抓取状态记录）=====
+def _today_str() -> str:
+    """返回今天的日期字符串（YYYY.M.D 格式，与存档目录一致）。"""
+    from datetime import date as _date
+    d = _date.today()
+    return f"{d.year}.{d.month}.{d.day}"
+
+
+def load_snapshots() -> dict:
+    """读取 data/snapshots.json，返回 {date_str: snapshot_dict}。"""
+    if not SNAPSHOTS_PATH.exists():
+        return {}
+    try:
+        with open(SNAPSHOTS_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def save_snapshots(snapshots: dict) -> None:
+    try:
+        with open(SNAPSHOTS_PATH, "w", encoding="utf-8") as f:
+            json.dump(snapshots, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+
+def generate_snapshot(target_date: str | None = None) -> dict:
+    """为指定日期生成/更新快照。
+
+    扫描该日的 articles.json + funds.json，统计：
+      - 是否有拉取记录
+      - 论文总数 / 公众号数 / 期刊数
+      - 基金数
+      - 涉及的来源列表（公众号名、期刊名）
+      - 基金关键词
+
+    target_date: None 表示今天，否则用 "YYYY.M.D" 格式。
+    返回生成的快照字典。
+    """
+    if target_date is None:
+        target_date = _today_str()
+
+    day_dir = ARCHIVE_DIR / target_date
+    jp = day_dir / "articles.json" if day_dir.is_dir() else None
+
+    snap = {
+        "date": target_date,
+        "fetched": False,
+        "total_articles": 0,
+        "mp_count": 0,
+        "journal_count": 0,
+        "fund_count": 0,
+        "mp_sources": [],
+        "journal_sources": [],
+        "fund_keywords": [],
+        "generated_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+    }
+
+    # ---- 统计论文 ----
+    if jp and jp.exists():
+        try:
+            arts = json.load(open(jp, "r", encoding="utf-8"))
+        except Exception:
+            arts = []
+        snap["fetched"] = True
+        mp_set: set[str] = set()
+        jnl_set: set[str] = set()
+        mp_c, jnl_c = 0, 0
+        for a in arts:
+            cat = a.get("category", "")
+            name = a.get("account", "未知")
+            if cat == "期刊":
+                jnl_c += 1
+                jnl_set.add(name)
+            else:  # 公众号 或未分类
+                mp_c += 1
+                mp_set.add(name)
+        snap["total_articles"] = len(arts)
+        snap["mp_count"] = mp_c
+        snap["journal_count"] = jnl_c
+        snap["mp_sources"] = sorted(mp_set)
+        snap["journal_sources"] = sorted(jnl_set)
+
+    # ---- 统计基金（funds.json 的 generated_at 可能跨天，以快照日期为准）----
+    if FUNDS_PATH.exists():
+        try:
+            with open(FUNDS_PATH, "r", encoding="utf-8") as f:
+                fdata = json.load(f)
+            funds = fdata.get("funds", [])
+            # 只在「今天」的快照里计入基金（避免历史快照重复计数）
+            if target_date == _today_str() and funds:
+                snap["fund_count"] = len(funds)
+                kw_set = {k for x in funds for k in (x.get("hit_keywords") or [])}
+                snap["fund_keywords"] = sorted(kw_set)
+        except Exception:
+            pass
+
+    # 持久化
+    snapshots = load_snapshots()
+    snapshots[target_date] = snap
+    save_snapshots(snapshots)
+    return snap
+
+
+def article_uid(a: dict) -> str:
+    """文章稳定唯一标识：优先 url，否则 account|date|title 哈希。"""
+    raw = a.get("url") or a.get("link") or ""
+    if not raw:
+        raw = "|".join([str(a.get("account", "")), str(a.get("date", "")), str(a.get("title", ""))])
+    return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16]
+
+
+def fund_uid(f: dict) -> str:
+    """基金稳定唯一标识：优先 id（kd.nsfc 项目号），回退批准号/名称。"""
+    return str(f.get("id") or f.get("ratify_no") or f.get("project_name", ""))
 
 
 def get_accounts() -> list[dict]:
@@ -228,6 +471,9 @@ def load_funds(q: str | None = None, kw: str | None = None, cat: str | None = No
         return {"funds": [], "generated_at": None, "completion_count": 0,
                 "support_count": 0, "support_note": "", "keywords": [], "total": 0, "papers_total": 0}
     funds = data.get("funds", [])
+    # 过滤已标记删除的基金
+    deleted_f = set(load_deleted().get("funds", []))
+    funds = [x for x in funds if fund_uid(x) not in deleted_f]
     if cat:
         funds = [x for x in funds if x.get("category") == cat]
     if kw:
@@ -238,6 +484,10 @@ def load_funds(q: str | None = None, kw: str | None = None, cat: str | None = No
             x.get("project_name", "") + x.get("keywords", "") + x.get("project_admin", "")
             + x.get("depend_unit", "") + x.get("code", "")
         ).lower()]
+    # 确保每个基金带稳定 id
+    for x in funds:
+        if not x.get("id"):
+            x["id"] = fund_uid(x)
     return {
         "funds": funds,
         "generated_at": data.get("generated_at"),
@@ -248,6 +498,70 @@ def load_funds(q: str | None = None, kw: str | None = None, cat: str | None = No
         "keywords": sorted({k for x in data.get("funds", []) for k in x.get("hit_keywords", [])}),
         "total": len(funds),
         "papers_total": sum(len(x.get("papers", [])) for x in data.get("funds", [])),
+    }
+
+
+def translate_fund_papers() -> dict:
+    """翻译 funds.json 中所有成果论文的英文标题，写入 title_zh 字段并保存。
+
+    使用 scripts/translator.py 的 translate_title（Google Translate + JSON 缓存）。
+    """
+    if not FUNDS_PATH.exists():
+        return {"ok": False, "error": "funds.json 不存在，请先抓取基金数据", "translated": 0}
+    try:
+        with open(FUNDS_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception as e:
+        return {"ok": False, "error": f"读取失败: {e}", "translated": 0}
+
+    # 动态导入 translator
+    import sys
+    sys.path.insert(0, str(SCRIPTS_DIR))
+    try:
+        from translator import translate_title, _save_cache
+    except ImportError as e:
+        return {"ok": False, "error": f"导入翻译模块失败: {e}（需安装 deep_translator）", "translated": 0}
+
+    funds = data.get("funds", [])
+    total_papers = 0
+    translated_count = 0
+    for fund in funds:
+        papers = fund.get("papers", [])
+        for paper in papers:
+            title = paper.get("title", "")
+            if not title:
+                continue
+            total_papers += 1
+            # 已有翻译则跳过
+            if paper.get("title_zh"):
+                translated_count += 1
+                continue
+            try:
+                zh = translate_title(title)
+                if zh and zh != title:
+                    paper["title_zh"] = zh
+                else:
+                    paper["title_zh"] = title  # 翻译失败/无需翻译时保留原文
+                translated_count += 1
+            except Exception:
+                paper["title_zh"] = title
+                translated_count += 1
+
+    # 保存回 funds.json
+    try:
+        with open(FUNDS_PATH, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        # 同时保存翻译缓存
+        try: _save_cache()
+        except Exception: pass
+    except Exception as e:
+        return {"ok": False, "error": f"保存失败: {e}", "translated": translated_count}
+
+    return {
+        "ok": True,
+        "translated": translated_count,
+        "total_papers": total_papers,
+        "message": f"已翻译 {translated_count}/{total_papers} 篇论文标题",
     }
 
 
@@ -460,6 +774,9 @@ def start_fetch(start_date: str | None = None, end_date: str | None = None) -> N
                     output=(proc.stdout or "") + (proc.stderr or ""),
                     code=proc.returncode,
                 )
+                # 抓取完成后自动生成/更新当日快照
+                try: generate_snapshot()
+                except Exception: pass
         except Exception as e:
             with FETCH_LOCK:
                 FETCH_STATE.update(running=False, finishedAt=now_iso(), output=str(e), code=-1)
@@ -467,8 +784,51 @@ def start_fetch(start_date: str | None = None, end_date: str | None = None) -> N
     threading.Thread(target=worker, daemon=True).start()
 
 
+def start_funds_fetch() -> None:
+    """后台运行 fetch_funds.py 抓取国自然基金数据。"""
+    global FUNDS_FETCH_STATE
+    with FUNDS_FETCH_LOCK:
+        if FUNDS_FETCH_STATE["running"]:
+            return
+        FUNDS_FETCH_STATE.update(running=True, startedAt=now_iso(), finishedAt=None, output="", code=None)
+
+    cmd = [str(PYTHON_EXE), str(SCRIPTS_DIR / "fetch_funds.py")]
+
+    def worker():
+        global FUNDS_FETCH_STATE
+        try:
+            proc = subprocess.run(
+                cmd,
+                capture_output=True, text=True, encoding="utf-8", timeout=900,
+                cwd=str(SCRIPTS_DIR),
+            )
+            with FUNDS_FETCH_LOCK:
+                FUNDS_FETCH_STATE.update(
+                    running=False,
+                    finishedAt=now_iso(),
+                    output=(proc.stdout or "") + (proc.stderr or ""),
+                    code=proc.returncode,
+                )
+        except Exception as e:
+            with FUNDS_FETCH_LOCK:
+                FUNDS_FETCH_STATE.update(running=False, finishedAt=now_iso(), output=str(e), code=-1)
+
+    threading.Thread(target=worker, daemon=True).start()
+
+
 def now_iso() -> str:
     return datetime.now().astimezone().isoformat(timespec="seconds")
+
+
+def _read_json_body(handler: BaseHTTPRequestHandler) -> dict:
+    """从 POST 请求体读取 JSON，失败返回空 dict。"""
+    length = int(handler.headers.get("Content-Length") or 0)
+    if length <= 0:
+        return {}
+    try:
+        return json.loads(handler.rfile.read(length).decode("utf-8") or "{}")
+    except Exception:
+        return {}
 
 
 def json_response(handler: BaseHTTPRequestHandler, payload, status: int = 200) -> None:
@@ -498,6 +858,7 @@ def static_response(handler: BaseHTTPRequestHandler, filename: str) -> None:
     handler.send_response(200)
     handler.send_header("Content-Type", content_type)
     handler.send_header("Content-Length", str(len(body)))
+    handler.send_header("Cache-Control", "no-store")
     handler.send_header("Access-Control-Allow-Origin", "*")
     handler.end_headers()
     handler.wfile.write(body)
@@ -578,8 +939,31 @@ class Handler(BaseHTTPRequestHandler):
                 # 代理获取国自然验证码图片
                 result = nsfc_captcha()
                 json_response(self, result)
+            elif path == "/api/funds/fetch/status":
+                json_response(self, FUNDS_FETCH_STATE)
             elif path == "/api/fetch/status":
                 json_response(self, FETCH_STATE)
+            elif path == "/api/snapshots":
+                # 列出所有快照日期（倒序）
+                snaps = load_snapshots()
+                dates = sorted(snaps.keys(), key=lambda d: _date_key(d), reverse=True)
+                json_response(self, {"dates": dates, "total": len(dates)})
+            elif path == "/api/deletion-audit":
+                audit_date = (qs.get("date") or [None])[0]
+                json_response(self, deletion_audit_summary(audit_date))
+            elif path.startswith("/api/snapshots/"):
+                # 获取某日快照详情
+                snap_date = path[len("/api/snapshots/"):]
+                snaps = load_snapshots()
+                if snap_date in snaps:
+                    json_response(self, snaps[snap_date])
+                else:
+                    # 日期不存在则尝试实时生成
+                    try:
+                        snap = generate_snapshot(snap_date)
+                        json_response(self, snap)
+                    except Exception as e:
+                        self._send_error(404, f"无 {snap_date} 的快照记录")
             else:
                 self._send_error(404, "Not Found")
         except Exception as e:
@@ -619,6 +1003,57 @@ class Handler(BaseHTTPRequestHandler):
                 params = {}
             result = nsfc_support_query(params)
             json_response(self, result)
+        elif path == "/api/funds/fetch":
+            start_funds_fetch()
+            json_response(self, {"started": True, "message": "国自然基金抓取已启动，请稍候…"})
+        elif path == "/api/funds/translate":
+            # 翻译基金成果论文的英文标题为中文
+            result = translate_fund_papers()
+            json_response(self, result)
+        elif path == "/api/articles/delete":
+            # 标记删除文章（按 id 加入 data/deleted.json 索引，非物理删除）
+            body = _read_json_body(self)
+            ids = body.get("ids", [])
+            d = load_deleted()
+            existing = set(d.get("articles", []))
+            added = 0
+            added_ids = []
+            for i in ids:
+                if i and i not in existing:
+                    existing.add(i)
+                    added += 1
+                    added_ids.append(i)
+            d["articles"] = list(existing)
+            save_deleted(d)
+            record_deletions("article", added_ids, body.get("records", []))
+            json_response(self, {"ok": True, "deleted": added, "message": f"已删除 {added} 篇文章"})
+        elif path == "/api/funds/delete":
+            # 标记删除基金（按 id 加入索引）
+            body = _read_json_body(self)
+            ids = body.get("ids", [])
+            d = load_deleted()
+            existing = set(d.get("funds", []))
+            added = 0
+            added_ids = []
+            for i in ids:
+                if i and i not in existing:
+                    existing.add(i)
+                    added += 1
+                    added_ids.append(i)
+            d["funds"] = list(existing)
+            save_deleted(d)
+            record_deletions("fund", added_ids, body.get("records", []))
+            json_response(self, {"ok": True, "deleted": added, "message": f"已删除 {added} 个基金"})
+        elif path == "/api/deleted/clear":
+            # 恢复全部已删除项（清空索引）
+            save_deleted({"articles": [], "funds": []})
+            json_response(self, {"ok": True, "message": "已恢复全部删除项"})
+        elif path == "/api/snapshots/generate":
+            # 手动生成/更新今日快照
+            body = _read_json_body(self)
+            target = body.get("date")  # 可选，默认今天
+            snap = generate_snapshot(target)
+            json_response(self, {"ok": True, "snapshot": snap})
         else:
             self._send_error(404, "Not Found")
 

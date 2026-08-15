@@ -10,14 +10,14 @@
 任务名：公众号每日论文推送
 触发：每天 07:30
 操作：python daily.py
-工作目录：A:\workbuddy项目\推送公众号论文\scripts
+工作目录：A:\workbuddy项目\论文观察台\scripts
 状态：PAUSED
 ```
 
 ## 手动执行
 
 ```bash
-cd "A:\workbuddy项目\推送公众号论文\scripts"
+cd "A:\workbuddy项目\论文观察台\scripts"
 python daily.py
 ```
 
@@ -44,7 +44,7 @@ python daily.py --force
 
 安装/卸载开机自启动：
 ```bash
-cd "A:\workbuddy项目\推送公众号论文\scripts"
+cd "A:\workbuddy项目\论文观察台\scripts"
 python install_startup.py           # 安装（开机登录后自动静默跑 daily.py）
 python install_startup.py --remove  # 卸载
 ```
@@ -56,7 +56,7 @@ python install_startup.py --remove  # 卸载
 桌面双击「论文观察台」快捷方式（`C:\Users\PC\Desktop\论文观察台.lnk`），或手动：
 
 ```bash
-cd "A:\workbuddy项目\推送公众号论文\web"
+cd "A:\workbuddy项目\论文观察台\web"
 python paper_observatory.py --port 8032
 ```
 
@@ -98,7 +98,7 @@ python paper_observatory.py --port 8032
 ## 升级 WeWe RSS
 
 ```bash
-cd "A:\workbuddy项目\推送公众号论文\wewe-rss"
+cd "A:\workbuddy项目\论文观察台\wewe-rss"
 git pull
 docker compose -f docker-compose.sqlite.yml pull
 docker compose -f docker-compose.sqlite.yml up -d

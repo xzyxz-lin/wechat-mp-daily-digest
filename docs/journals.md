@@ -28,6 +28,8 @@
 
 当前包含：
 
+> 2026-08-15 已完成连通性修复：ScienceDirect 期刊改用官方 `rss.sciencedirect.com/publication/science/{ISSN}` 地址；ACS 两刊和 MDPI《Membranes》在 RSS 返回 403 时，改用 Crossref 公开 DOI 元数据。配置内以 `source_type: "crossref"` 明确标识，其他来源仍走原生 RSS/Atom。
+
 | 期刊 | 出版商 | 本环境状态 |
 |------|--------|-----------|
 | Journal of Membrane Science | ScienceDirect | ⚠️ 被拦截(403) |

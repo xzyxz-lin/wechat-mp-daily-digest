@@ -70,8 +70,8 @@ if __name__ == "__main__":
     desktop = os.path.join(os.environ["USERPROFILE"], "Desktop")
     lnk = create_shortcut(
         lnk_path=os.path.join(desktop, "论文观察台.lnk"),
-        target=r"A:\workbuddy项目\推送公众号论文\web\start_web.cmd",
-        working_dir=r"A:\workbuddy项目\推送公众号论文\web",
+        target=r"A:\workbuddy项目\论文观察台\web\start_web.cmd",
+        working_dir=r"A:\workbuddy项目\论文观察台\web",
         description="论文观察台 - 本地 Web 管理 (http://127.0.0.1:8032)",
         show_cmd=7,
     )

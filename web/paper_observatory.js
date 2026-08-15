@@ -2,7 +2,7 @@
   "use strict";
 
   const state = {
-    view: "dashboard",        // dashboard | aggregate | account | fund
+    view: "dashboard",        // dashboard | aggregate | account | fund | favorites
     currentAccount: null,
     currentCategory: "",       // 论文总控筛选："" | 公众号 | 期刊
     currentPage: 1,
@@ -16,7 +16,24 @@
     fundData: null,
     fundKw: "",
     fundQ: "",
+    favCat: "公众号",          // 私人珍藏当前标签
+    // 多选 / 批量删除
+    selArticles: new Set(),   // 已选文章 id
+    selFunds: new Set(),      // 已选基金 id
+    selFav: new Set(),        // 私人珍藏中已选（值为 getFavId）
+    lastAnchorArticle: null,  // Shift 范围选锚点
+    lastAnchorFund: null,
+    lastAnchorFav: null,
+    continuousSelection: false, // 连续删除模式：普通点击按 Ctrl/Cmd 多选处理
+    selectedItems: {
+      article: new Map(),       // 已选文章的完整数据，用于删除前收藏保护
+      fund: new Map(),
+      fav: new Map(),
+    },
   };
+
+  // 卡片留白区用于整项操作；以下文字区保留浏览器原生的拖拽选字能力。
+  const ROW_TEXT_SELECTOR = ".article-row__time, .article-row__main, .cat-badge, .fund-row__main, .fund-row__stat";
 
   const $ = (sel) => document.querySelector(sel);
   const navStack = $("#nav-stack");
@@ -114,6 +131,10 @@
         state.fundKeywords = funds.keywords || [];
         updateFundDashboard(funds);
       } catch (e) { /* 无基金数据时不报错 */ }
+      // 更新收藏计数
+      try { updateFavCounts(); const fav = loadFavorites(); const navFavTotal = document.getElementById("nav-fav-total"); if (navFavTotal) navFavTotal.textContent = fav.mp.length + fav.journal.length + fav.fund.length; } catch(e){}
+      // 加载每日快照
+      loadSnapshot();
     } catch (e) {
       showToast("加载总览失败：" + e.message, true);
     }
@@ -140,6 +161,9 @@
     navStack.innerHTML = `
       <button class="nav-item is-active" data-view="dashboard" type="button">
         <svg><use href="#i-grid"/></svg><span>文件总控</span><b>HOME</b>
+      </button>
+      <button class="nav-item" data-view="favorites" type="button">
+        <svg><use href="#i-star"/></svg><span>私人珍藏</span><b id="nav-fav-total">0</b>
       </button>
       ${group("公众号", "公众号", pub)}
       ${group("期刊", "期刊", jour)}
@@ -277,6 +301,10 @@
         : (key && btn.dataset.account === key ? true : false);
       btn.classList.toggle("is-active", match);
     });
+    // 更新收藏总数
+    if (key === "favorites") {
+      try { const fav = loadFavorites(); const el = document.getElementById("nav-fav-total"); if (el) el.textContent = fav.mp.length + fav.journal.length + fav.fund.length; } catch(e){}
+    }
   }
 
   async function openAccount(name) {
@@ -316,7 +344,7 @@
       <div class="date-group">
         <div class="date-group__head"><span class="dot"></span><h3>${formatDateLabel(date)}</h3><span>${list.length} 篇</span></div>
         ${list.map((a) => `
-          <div class="article-row" data-article='${escapeHtml(JSON.stringify(a))}'>
+          <div class="article-row" data-article='${escapeHtml(JSON.stringify(a))}' data-sel-id='${escapeHtml(String(a.id))}' data-sel-kind="article">
             <div class="article-row__time">${formatTime(a.date_published)}</div>
             <div class="article-row__main">
               <h4>${escapeHtml(a.title)}</h4>
@@ -328,10 +356,8 @@
       </div>`).join("");
     if (pageEl) pageEl.classList.add("is-visible");
     container.querySelectorAll(".article-row").forEach((row) => {
-      row.addEventListener("click", () => {
-        try { openDrawer(JSON.parse(row.dataset.article)); }
-        catch (e) { openDrawer({ title: "文章", url: "#" }); }
-      });
+      row.addEventListener("click", (e) => handleRowClick(row, e));
+      row.addEventListener("dblclick", () => handleRowDblClick(row));
     });
   }
 
@@ -359,6 +385,7 @@
 
   // ===== 论文总控（聚合） =====
   async function loadAggregate(category, page) {
+    if (page === 1) clearSelection();   // 进入新列表时清空选择
     try {
       const q = category ? `&category=${encodeURIComponent(category)}` : "";
       const data = await fetchJSON(`/api/articles?page=${page}&size=${state.pageSize}${q}`);
@@ -411,6 +438,11 @@
   document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeDrawer(); });
 
   // ===== 基金模块 =====
+  const fundsFetchButton = $("#funds-fetch-button");
+  const fundsFetchText = $("#funds-fetch-text");
+  const fundsFetchStatus = $("#funds-fetch-status");
+  let fundsFetchPolling = null;
+
   function updateFundDashboard(funds) {
     const pc = document.getElementById("fund-card-projects");
     const pp = document.getElementById("fund-card-papers");
@@ -419,6 +451,56 @@
     if (pp) pp.textContent = funds.papers_total || 0;
     if (navc) navc.textContent = funds.total || 0;
   }
+
+  // 基金一键抓取
+  async function triggerFundsFetch() {
+    if (fundsFetchButton.disabled) return;
+    fundsFetchButton.disabled = true;
+    fundsFetchButton.classList.add("is-running");
+    fundsFetchText.textContent = "抓取中…";
+    try {
+      await fetchJSON("/api/funds/fetch", { method: "POST" });
+      showToast("国自然基金抓取已启动，正在后台运行…");
+      pollFundsFetchStatus();
+    } catch (e) {
+      showToast("启动基金抓取失败：" + e.message, true);
+      resetFundsFetchButton();
+    }
+  }
+
+  function pollFundsFetchStatus() {
+    clearInterval(fundsFetchPolling);
+    fundsFetchPolling = setInterval(async () => {
+      try {
+        const s = await fetchJSON("/api/funds/fetch/status");
+        if (!s.running) {
+          clearInterval(fundsFetchPolling);
+          resetFundsFetchButton();
+          if (s.code === 0) {
+            showToast("基金数据抓取完成！");
+            fundsFetchStatus.textContent = "✓ " + new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" }) + " 完成";
+            loadFunds(state.fundKw, state.fundQ); // 刷新列表
+            // 同时刷新总控卡片
+            try { const fd = await fetchJSON("/api/funds"); updateFundDashboard(fd); } catch(e){}
+          } else {
+            showToast("基金抓取失败，详见后端日志", true);
+            fundsFetchStatus.textContent = "✗ 失败";
+          }
+        }
+      } catch (e) {
+        clearInterval(fundsFetchPolling);
+        resetFundsFetchButton();
+      }
+    }, 2000);
+  }
+
+  function resetFundsFetchButton() {
+    fundsFetchButton.disabled = false;
+    fundsFetchButton.classList.remove("is-running");
+    fundsFetchText.textContent = "抓取基金数据";
+  }
+
+  fundsFetchButton.addEventListener("click", triggerFundsFetch);
 
   const fundList = $("#fund-list");
   const fundFilters = $("#fund-filters");
@@ -461,7 +543,7 @@
     const srcLine = data && data.source
       ? `<p class="fund-source">数据源：${escapeHtml(data.source)} ｜ 生成时间：${escapeHtml((data.generated_at || "").slice(0, 19).replace("T", " "))}</p>` : "";
     fundList.innerHTML = note + srcLine + funds.map((f) => `
-      <div class="fund-row" data-fund='${escapeHtml(JSON.stringify(f))}'>
+      <div class="fund-row" data-fund='${escapeHtml(JSON.stringify(f))}' data-sel-id='${escapeHtml(String(f.id))}' data-sel-kind="fund">
         <div class="fund-row__main">
           <h4>${escapeHtml(f.project_name || "（无标题）")}</h4>
           <p class="fund-row__meta">
@@ -479,10 +561,8 @@
         <div class="article-row__arrow"><svg><use href="#i-arrow"/></svg></div>
       </div>`).join("");
     fundList.querySelectorAll(".fund-row").forEach((row) => {
-      row.addEventListener("click", () => {
-        try { openFundDrawer(JSON.parse(row.dataset.fund)); }
-        catch (e) { showToast("打开详情失败", true); }
-      });
+      row.addEventListener("click", (e) => handleRowClick(row, e));
+      row.addEventListener("dblclick", () => handleRowDblClick(row));
     });
   }
 
@@ -512,6 +592,7 @@
         <li>
           <span class="ptype">${escapeHtml(p.type || "成果")}</span>
           <span class="ptitle">${escapeHtml(p.title || "")}</span>
+          ${p.title_zh ? `<span class="ptitle-zh">${escapeHtml(p.title_zh)}</span>` : ""}
           <span class="pauthors">${escapeHtml(p.authors || "")}</span>
         </li>`).join("")
       : `<li class="empty-hint">该项目未列出成果论文</li>`;
@@ -531,6 +612,32 @@
   fundDrawerBackdrop.addEventListener("click", closeFundDrawer);
   document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeFundDrawer(); });
 
+  // 基金论文标题翻译
+  const fundTranslateBtn = $("#fund-translate-btn");
+  fundTranslateBtn.addEventListener("click", async () => {
+    fundTranslateBtn.disabled = true;
+    fundTranslateBtn.textContent = "翻译中…";
+    try {
+      const r = await fetchJSON("/api/funds/translate");
+      if (r.ok) {
+        showToast(r.message || `已翻译 ${r.translated} 篇`);
+        // 刷新当前抽屉的论文列表
+        if (state.fundData) {
+          const currentFundId = $("#fund-drawer-name").textContent;
+          const fund = (state.fundData.funds || []).find(f => f.project_name === currentFundId);
+          if (fund) openFundDrawer(fund);
+        }
+      } else {
+        showToast(r.error || "翻译失败", true);
+      }
+    } catch (e) {
+      showToast("翻译请求失败：" + e.message, true);
+    } finally {
+      fundTranslateBtn.disabled = false;
+      fundTranslateBtn.textContent = "翻译标题";
+    }
+  });
+
   // 基金搜索（防抖）
   let fundSearchTimer = null;
   fundSearchInput.addEventListener("input", () => {
@@ -541,113 +648,19 @@
 
   // 进入基金视图时加载列表（防抖避免重复请求）
 
-  // ===== 获批/资助查询（验证码） =====
-  const captchaImg = $("#captcha-img");
-  const captchaRefresh = $("#captcha-refresh");
-  const captchaInput = $("#captcha-input");
-  const captchaHint = $("#captcha-hint");
-  const sqSubmit = $("#sq-submit");
-  const sqStatus = $("#sq-status");
-  const sqResults = $("#support-results");
-  const sqError = $("#support-error");
-  const sqTbody = $("#support-tbody");
-  const sqCount = $("#support-count");
-
-  async function loadCaptcha() {
-    captchaHint.textContent = "加载中...";
-    captchaImg.src = "";
-    try {
-      const r = await fetch("/api/funds/captcha");
-      const d = await r.json();
-      if (d.ok && d.image) {
-        captchaImg.src = `data:${d.content_type || "image/png"};base64,${d.image}`;
-        captchaHint.textContent = "";
-        captchaInput.focus();
-      } else {
-        captchaHint.textContent = d.error || "获取失败";
-      }
-    } catch (e) {
-      captchaHint.textContent = "网络错误：" + e.message;
-    }
+  // ===== 获批/资助查询（iframe 嵌入官方页面） =====
+  // 验证码在 kd.nsfc.cn 官方页面中原生加载，无需代理
+  const nsfcIframe = $("#nsfc-iframe");
+  if (nsfcIframe) {
+    nsfcIframe.addEventListener("load", () => {
+      nsfcIframe.style.background = "#fff";
+    });
+    nsfcIframe.addEventListener("error", () => {
+      nsfcIframe.style.background = "var(--paper-50)";
+      nsfcIframe.insertAdjacentHTML("afterend",
+        '<p style="padding:20px;text-align:center;color:var(--ink-700);">iframe 加载失败，请<a href="https://kd.nsfc.cn/#/fundingInit" target="_blank" rel="noopener">点击这里在新标签页打开</a></p>');
+    });
   }
-
-  captchaRefresh.addEventListener("click", loadCaptcha);
-  captchaImg.addEventListener("click", loadCaptcha);
-
-  async function submitSupportQuery() {
-    const code = captchaInput.value.trim();
-    if (!code) { showToast("请输入验证码"); return; }
-
-    sqSubmit.disabled = true;
-    sqStatus.textContent = "查询中...";
-    sqError.hidden = true;
-    sqResults.hidden = true;
-
-    try {
-      const r = await fetch("/api/funds/support-query", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          captcha: code,
-          keyword: $("#sq-keyword").value.trim(),
-          person: $("#sq-person").value.trim(),
-          unit: $("#sq-unit").value.trim(),
-          year_start: $("#sq-year-start").value || "2020",
-          year_end: $("#sq-year-end").value || "2025",
-        }),
-      });
-      const d = await r.json();
-      if (!d.ok) {
-        sqStatus.textContent = "";
-        sqError.textContent = d.error || "查询失败";
-        sqError.hidden = false;
-        loadCaptcha(); // 刷新验证码
-      } else {
-        sqStatus.textContent = "";
-        sqError.hidden = true;
-        renderSupportResults(d.results);
-        sqResults.hidden = false;
-      }
-    } catch (e) {
-      sqStatus.textContent = "";
-      sqError.textContent = "网络错误：" + e.message;
-      sqError.hidden = false;
-    } finally {
-      sqSubmit.disabled = false;
-    }
-  }
-
-  function renderSupportResults(results) {
-    sqCount.textContent = `共 ${results.length} 条结果`;
-    if (results.length === 0) {
-      sqTbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:var(--ink-700);padding:20px;">未找到匹配项目，试试换关键词</td></tr>`;
-      return;
-    }
-    sqTbody.innerHTML = results.map(r => `<tr>
-      <td>${escapeHtml(r.project_name)}</td>
-      <td>${escapeHtml(r.admin)}</td>
-      <td>${escapeHtml(r.unit)}</td>
-      <td>${escapeHtml(r.amount)}</td>
-      <td>${escapeHtml(r.year)}</td>
-      <td>${escapeHtml(r.type)}</td>
-    </tr>`).join("");
-  }
-
-  sqSubmit.addEventListener("click", submitSupportQuery);
-  captchaInput.addEventListener("keydown", (e) => { if (e.key === "Enter") submitSupportQuery(); });
-  // 导出按钮
-  $("#support-export").addEventListener("click", () => {
-    const rows = Array.from(sqTbody.querySelectorAll("tr")).map(tr =>
-      Array.from(tr.querySelectorAll("td")).map(td => td.textContent).join("\t")
-    ).join("\n");
-    const header = "项目名称\t负责人\t依托单位\t金额(万)\t批准年度\t类型\n";
-    const blob = new Blob([header + rows], { type: "text/plain;charset=utf-8" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = `NSFC_获批项目_${new Date().toISOString().slice(0,10)}.tsv`;
-    a.click();
-    URL.revokeObjectURL(a.href);
-  });
 
   // ===== /获批查询结束 =====
 
@@ -742,6 +755,919 @@
     }
   }
   fetchCustomConfirm.addEventListener("click", triggerCustomFetch);
+
+  // ===== 收藏系统（私人珍藏） =====
+  const FAV_KEY = "paper_obs_favorites";
+  const SWIPE_THRESHOLD = 80; // 右滑超过 80px 触发收藏
+  const STAR_HTML = `<span class="fav-star" aria-label="已收藏">★</span>`;
+  // 全局滑动抑制时间戳：每次鼠标/触摸按下时更新，
+  // click / dblclick 处理器通过它判断最近是否有拖动操作
+  let _suppressClickUntil = 0;
+
+  function loadFavorites() {
+    try { return JSON.parse(localStorage.getItem(FAV_KEY) || '{"mp":[],"journal":[],"fund":[]}'); }
+    catch { return { mp: [], journal: [], fund: [] }; }
+  }
+
+  function saveFavorites(fav) {
+    localStorage.setItem(FAV_KEY, JSON.stringify(fav));
+  }
+
+  function getFavId(item, cat) {
+    /* 生成唯一 ID：公众号/期刊用 account+date+title 哈希，基金用 ratify_no */
+    if (cat === "fund" || cat === "基金") return "f_" + (item.ratify_no || item.project_name || "");
+    return (item.account || "") + "_" + (item.date || "") + "_" + (item.title || "");
+  }
+
+  function isFavorited(item, cat) {
+    const fav = loadFavorites();
+    const key = cat === "公众号" ? "mp" : (cat === "期刊" ? "journal" : "fund");
+    const id = getFavId(item, cat);
+    return fav[key].some(f => getFavId(f, cat) === id);
+  }
+
+  function favoriteIdentityCandidates(item, kind) {
+    const isFund = kind === "fund" || Boolean(item.ratify_no || item.project_name);
+    if (!isFund) return new Set([getFavId(item, "公众号")]);
+    // 同时识别新基金 ID 和早期中文分类下的旧 ID，避免旧收藏遗漏保护。
+    return new Set([
+      getFavId(item, "基金"),
+      (item.account || "") + "_" + (item.date || "") + "_" + (item.title || ""),
+    ]);
+  }
+
+  function isFavoritedAnywhere(item, kind) {
+    // 兼容早期版本把单来源期刊写入错误收藏分组的情况；删除保护不能依赖当前页面分类。
+    const fav = loadFavorites();
+    const candidateIds = favoriteIdentityCandidates(item, kind);
+    return [fav.mp || [], fav.journal || [], fav.fund || []].some(items => items.some(saved =>
+      Array.from(favoriteIdentityCandidates(saved)).some(id => candidateIds.has(id))
+    ));
+  }
+
+  function addFavorite(item, cat) {
+    const fav = loadFavorites();
+    const key = cat === "公众号" ? "mp" : (cat === "期刊" ? "journal" : "fund");
+    const id = getFavId(item, cat);
+    if (fav[key].some(f => getFavId(f, cat) === id)) return false; // 已收藏
+    fav[key].push({ ...item, _favAt: new Date().toISOString() });
+    saveFavorites(fav);
+    updateFavCounts();
+    return true;
+  }
+
+  function removeFavorite(item, cat) {
+    const fav = loadFavorites();
+    const key = cat === "公众号" ? "mp" : (cat === "期刊" ? "journal" : "fund");
+    const id = getFavId(item, cat);
+    const idx = fav[key].findIndex(f => getFavId(f, cat) === id);
+    if (idx < 0) return false; // 未收藏
+    fav[key].splice(idx, 1);
+    saveFavorites(fav);
+    updateFavCounts();
+    return true;
+  }
+
+  // toggleFavorite 保留给其他场景（如点击星标按钮）
+  function toggleFavorite(item, cat) {
+    const fav = loadFavorites();
+    const key = cat === "公众号" ? "mp" : (cat === "期刊" ? "journal" : "fund");
+    const id = getFavId(item, cat);
+    const idx = fav[key].findIndex(f => getFavId(f, cat) === id);
+    if (idx >= 0) {
+      fav[key].splice(idx, 1);
+      showToast("已取消收藏");
+    } else {
+      fav[key].push({ ...item, _favAt: new Date().toISOString() });
+      showToast("★ 已加入私人珍藏");
+    }
+    saveFavorites(fav);
+    updateFavCounts();
+    return idx < 0;
+  }
+
+  function updateFavCounts() {
+    const fav = loadFavorites();
+    const el = (id) => document.getElementById(id);
+    if (el("fav-mp-count")) el("fav-mp-count").textContent = fav.mp.length;
+    if (el("fav-journal-count")) el("fav-journal-count").textContent = fav.journal.length;
+    if (el("fav-fund-count")) el("fav-fund-count").textContent = fav.fund.length;
+  }
+
+  // 右滑标记：绑定到 article-row 和 fund-row
+  function setupSwipeMark(containerSelector, rowSelector, cat) {
+    let startX = 0, startY = 0, currentX = 0, dragging = false, row = null;
+    let didSwipe = false;  // 标记是否发生了有效滑动（用于阻止 click 弹抽屉）
+
+    function onDown(e) {
+      // 鼠标从文字区域开始拖拽时，优先按普通文本选择处理，
+      // 不把它误认为横向滑动收藏。
+      if (!e.touches && e.target.closest(ROW_TEXT_SELECTOR)) return;
+      row = e.target.closest(rowSelector);
+      if (!row) return;
+      dragging = true;
+      didSwipe = false;
+      startX = e.touches ? e.touches[0].clientX : e.clientX;
+      startY = e.touches ? e.touches[0].clientY : e.clientY;
+      currentX = startX;
+      row.style.transition = "none";
+      row._swiping = true;  // 标记正在拖动
+    }
+
+    function onMove(e) {
+      if (!dragging || !row) return;
+      currentX = e.touches ? e.touches[0].clientX : e.clientX;
+      const dx = currentX - startX;
+      const dy = Math.abs((e.touches ? e.touches[0].clientY : e.clientY) - startY);
+      if (dy > 30) { dragging = false; row.style.transform = ""; row.style.transition = ""; row._swiping = false; return; } // 纵向滚动优先
+      if (Math.abs(dx) > 2) didSwipe = true;  // 移动超过 2px 就算拖动
+      if (didSwipe) _suppressClickUntil = Date.now() + 300;  // 仅在真正拖动时抑制随后的 click
+      if (Math.abs(dx) > 0) {
+        // 双向滑动视觉反馈：右滑铜色(收藏)，左滑红色(取消)
+        const clampedDx = Math.max(-120, Math.min(dx, 120));
+        row.style.transform = `translateX(${clampedDx}px)`;
+        const alpha = Math.min(Math.abs(dx) / SWIPE_THRESHOLD, 1);
+        if (dx > 0) {
+          // 右滑 → 铜色（收藏）
+          row.style.boxShadow = `inset -30px 0 ${20 + Math.abs(dx)/3}px rgba(168,81,46,${alpha * 0.15})`;
+          row.style.borderColor = `rgba(168,81,46,${alpha})`;
+        } else {
+          // 左滑 → 红色（取消收藏）
+          row.style.boxShadow = `inset 30px 0 ${20 + Math.abs(dx)/3}px rgba(220,38,38,${alpha * 0.15})`;
+          row.style.borderColor = `rgba(220,38,38,${alpha})`;
+        }
+      }
+    }
+
+    function onUp(e) {
+      if (!dragging || !row) return;
+      dragging = false;
+      const dx = currentX - startX;
+      row.style.transition = "transform 0.3s ease, box-shadow 0.3s ease, border-color 0.3s ease";
+      let isFavoritesPage = row.closest("#fav-list") !== null;
+
+      if (dx >= SWIPE_THRESHOLD) {
+        // ===== 右滑 → 收藏 =====
+        try {
+          let item;
+          if (cat === "fund") item = JSON.parse(row.dataset.fund);
+          else item = JSON.parse(row.dataset.article);
+          const added = addFavorite(item, cat);
+          if (added) {
+            row.classList.add("is-favorited");
+            if (!row.querySelector(".fav-star")) {
+              const star = document.createElement("span");
+              star.className = "fav-star-inline";
+              star.innerHTML = "★";
+              star.setAttribute("aria-label", "已收藏");
+              row.insertBefore(star, row.firstChild);
+            }
+            showToast("★ 已收藏");
+          }
+          row.style.transform = "translateX(0)";
+          setTimeout(() => { row.style.transform = ""; row.style.boxShadow = ""; row.style.borderColor = ""; row._swiping = false; }, 300);
+        } catch(err) { row._swiping = false; }
+      } else if (dx <= -SWIPE_THRESHOLD) {
+        // ===== 左滑 → 取消收藏 =====
+        try {
+          let item;
+          if (cat === "fund") item = JSON.parse(row.dataset.fund);
+          else item = JSON.parse(row.dataset.article);
+          const removed = removeFavorite(item, cat);
+          if (removed) {
+            showToast("已取消收藏");
+            if (isFavoritesPage) {
+              // 收藏页：直接从 DOM 移除该行
+              row.style.transform = "translateX(-120px)";
+              row.style.opacity = "0";
+              setTimeout(() => { row.remove(); checkFavoritesEmpty(cat); }, 280);
+              row._swiping = false;
+              return;  // 不恢复样式，行已被移除
+            } else {
+              // 列表页：移除星标
+              row.classList.remove("is-favorited");
+              const star = row.querySelector(".fav-star-inline");
+              if (star) star.remove();
+            }
+          }
+          row.style.transform = "translateX(0)";
+          setTimeout(() => { row.style.transform = ""; row.style.boxShadow = ""; row.style.borderColor = ""; row._swiping = false; }, 300);
+        } catch(err) { row._swiping = false; }
+      } else {
+        row.style.transform = "";
+        row.style.boxShadow = "";
+        row.style.borderColor = "";
+        row._swiping = false;
+      }
+      // 延迟清除标记，确保 click 事件能读到它
+      if (didSwipe && row) {
+        const r = row;
+        setTimeout(() => { if(r) r._swiping = false; }, 50);
+      }
+      row = null;
+    }
+
+    // 用事件委托绑定到容器
+    const containers = document.querySelectorAll(containerSelector);
+    containers.forEach(c => {
+      c.addEventListener("mousedown", (e) => {
+        if (!e.shiftKey || !e.target.closest(rowSelector)) return;
+        // Shift 只用于列表范围多选，禁止浏览器把它解释为连续选字。
+        window.getSelection().removeAllRanges();
+        e.preventDefault();
+      }, true);
+      c.addEventListener("mousedown", onDown, { passive: true });
+      c.addEventListener("mousemove", onMove, { passive: true });
+      c.addEventListener("mouseup", onUp);
+      c.addEventListener("mouseleave", () => { if (dragging) { dragging = false; if(row){row.style.transform="";row.style.boxShadow="";row.style.borderColor="";row._swiping=false;row=null;} } });
+      c.addEventListener("touchstart", onDown, { passive: true });
+      c.addEventListener("touchmove", onMove, { passive: true });
+      c.addEventListener("touchend", onUp);
+    });
+  }
+
+  // 检查收藏列表是否为空
+  function checkFavoritesEmpty(cat) {
+    const fav = loadFavorites();
+    const key = cat === "公众号" ? "mp" : (cat === "期刊" ? "journal" : "fund");
+    if ((fav[key] || []).length === 0) {
+      const favList = $("#fav-list");
+      const favEmptyHint = $("#fav-empty-hint");
+      if (favList) favList.innerHTML = "";
+      if (favEmptyHint) favEmptyHint.hidden = false;
+      updateFavCounts();
+    }
+  }
+
+  // 渲染已有收藏标记（页面加载/切换时）
+  function renderExistingMarks(containerSelector, rowSelector, cat) {
+    const fav = loadFavorites();
+    const key = cat === "公众号" ? "mp" : (cat === "期刊" ? "journal" : "fund");
+    const favIds = new Set(fav[key].map(f => getFavId(f, cat)));
+    document.querySelectorAll(`${containerSelector} ${rowSelector}`).forEach(row => {
+      try {
+        let item;
+        if (cat === "fund") item = JSON.parse(row.dataset.fund);
+        else item = JSON.parse(row.dataset.article);
+        if (favIds.has(getFavId(item, cat))) {
+          row.classList.add("is-favorited");
+          if (!row.querySelector(".fav-star-inline")) {
+            const star = document.createElement("span");
+            star.className = "fav-star-inline";
+            star.innerHTML = "★";
+            row.insertBefore(star, row.firstChild);
+          }
+        }
+      } catch(e) {}
+    });
+  }
+
+  // ===== 多选 + 批量删除 =====
+  function rowSelId(row) {
+    if (row.dataset.selId) return row.dataset.selId;
+    try {
+      if (row.dataset.fund) return String(JSON.parse(row.dataset.fund).id);
+      if (row.dataset.article) return JSON.parse(row.dataset.article).id;
+    } catch (e) {}
+    return null;
+  }
+  function rowSelKind(row) {
+    if (row.dataset.selKind) return row.dataset.selKind;   // "article" | "fund" | "fav"
+    if (row.dataset.fund) return "fund";
+    if (row.dataset.article) return "article";
+    return null;
+  }
+  function rangeSelectInContainer(container, targetRow, kind) {
+    const rows = Array.from(container.querySelectorAll(".article-row, .fund-row"));
+    const ids = rows.map(r => rowSelId(r));
+    const targetId = rowSelId(targetRow);
+    const anchorId = kind === "fav" ? state.lastAnchorFav
+      : (kind === "fund" ? state.lastAnchorFund : state.lastAnchorArticle);
+    const iA = ids.indexOf(anchorId);
+    const iT = ids.indexOf(targetId);
+    if (iA < 0 || iT < 0) return;
+    const [lo, hi] = iA < iT ? [iA, iT] : [iT, iA];
+    for (let i = lo; i <= hi; i++) {
+      const rid = ids[i];
+      if (rid == null) continue;
+      if (kind === "fav") state.selFav.add(rid);
+      else if (kind === "fund") state.selFunds.add(rid);
+      else state.selArticles.add(rid);
+    }
+  }
+  function handleRowClick(row, e) {
+    if (row._swiping || Date.now() < _suppressClickUntil) return;  // 拖动/滑动抑制 click
+    if (rowHasTextSelection(row)) return;  // 拖拽选中的文字不再触发行选中
+    const kind = rowSelKind(row);
+    const id = rowSelId(row);
+    if (!id || !kind) return;
+
+    if (kind === "fav") {
+      if (e.shiftKey && state.lastAnchorFav) {
+        rangeSelectInContainer(row.parentElement, row, "fav");
+      } else if (e.ctrlKey || e.metaKey || state.continuousSelection) {
+        if (state.selFav.has(id)) state.selFav.delete(id); else state.selFav.add(id);
+        state.lastAnchorFav = id;
+      } else {
+        state.selFav.clear();
+        state.selFav.add(id);
+        state.lastAnchorFav = id;
+      }
+      updateSelectionUI();
+      return;
+    }
+
+    const set = kind === "fund" ? state.selFunds : state.selArticles;
+    const anchorKey = kind === "fund" ? "lastAnchorFund" : "lastAnchorArticle";
+    if (e.shiftKey && state[anchorKey]) {
+      rangeSelectInContainer(row.parentElement, row, kind);
+    } else if (e.ctrlKey || e.metaKey || state.continuousSelection) {
+      if (set.has(id)) set.delete(id); else set.add(id);
+      state[anchorKey] = id;
+    } else {
+      set.clear();
+      set.add(id);
+      state[anchorKey] = id;
+    }
+    updateSelectionUI();
+  }
+  function handleRowDblClick(row) {
+    if (row._swiping) return;  // 仅真正拖动时抑制 dblclick（双击不检查抑制窗口，避免误杀）
+    if (rowHasTextSelection(row)) return;
+    try {
+      if (row.dataset.fund) openFundDrawer(JSON.parse(row.dataset.fund));
+      else if (row.dataset.article) openDrawer(JSON.parse(row.dataset.article));
+    } catch (e) {}
+  }
+  function rowHasTextSelection(row) {
+    const selection = window.getSelection();
+    if (!selection || selection.isCollapsed || !selection.rangeCount) return false;
+    return row.contains(selection.anchorNode) || row.contains(selection.focusNode);
+  }
+  function updateSelectionUI() {
+    document.querySelectorAll(".article-row, .fund-row").forEach(row => {
+      const id = rowSelId(row);
+      if (id == null) return;
+      const kind = rowSelKind(row);
+      let sel;
+      if (kind === "fav") sel = state.selFav.has(id);
+      else if (kind === "fund") sel = state.selFunds.has(id);
+      else sel = state.selArticles.has(id);
+      row.classList.toggle("is-selected", sel);
+    });
+    syncSelectedItemMetadata();
+    const total = state.selArticles.size + state.selFunds.size + state.selFav.size;
+    const bar = document.getElementById("bulk-delete-bar");
+    if (!bar) return;
+    const continuousButton = document.getElementById("bulk-continuous-selection");
+    const deleteButton = document.getElementById("bulk-delete-btn");
+    bar.hidden = total === 0 && !state.continuousSelection;
+    document.getElementById("bulk-delete-count").textContent = state.continuousSelection
+      ? `已选中 ${total} 项 · 连续删除已开启`
+      : `已选中 ${total} 项`;
+    if (deleteButton) deleteButton.disabled = total === 0;
+    if (continuousButton) {
+      continuousButton.classList.toggle("is-active", state.continuousSelection);
+      continuousButton.setAttribute("aria-pressed", String(state.continuousSelection));
+      continuousButton.textContent = state.continuousSelection ? "连续删除：开" : "连续删除";
+    }
+  }
+  function clearSelection() {
+    state.selArticles.clear();
+    state.selFunds.clear();
+    state.selFav.clear();
+    state.lastAnchorArticle = null;
+    state.lastAnchorFund = null;
+    state.lastAnchorFav = null;
+    state.selectedItems.article.clear();
+    state.selectedItems.fund.clear();
+    state.selectedItems.fav.clear();
+    updateSelectionUI();
+  }
+  function selectionSetFor(kind) {
+    if (kind === "fav") return state.selFav;
+    if (kind === "fund") return state.selFunds;
+    return state.selArticles;
+  }
+  function selectionItemTitle(item, kind) {
+    if (kind === "fund" || item.project_name) return item.project_name || "未命名基金项目";
+    return item.title || "未命名文章";
+  }
+  function favoriteCategoryFor(item, kind, row) {
+    if (kind === "fund" || item.project_name) return "基金";
+    if (row && row.dataset.selCat) return row.dataset.selCat;
+    return item.category === "期刊" ? "期刊" : "公众号";
+  }
+  function syncSelectedItemMetadata() {
+    document.querySelectorAll(".article-row, .fund-row").forEach(row => {
+      const kind = rowSelKind(row);
+      const id = rowSelId(row);
+      if (!kind || id == null || !selectionSetFor(kind).has(id)) return;
+      try {
+        const item = JSON.parse(row.dataset.fund || row.dataset.article);
+        state.selectedItems[kind].set(id, {
+          id,
+          kind,
+          item,
+          category: favoriteCategoryFor(item, kind, row),
+          favorited: row.classList.contains("is-favorited"),
+        });
+      } catch (e) {}
+    });
+    ["article", "fund", "fav"].forEach(kind => {
+      const selected = selectionSetFor(kind);
+      state.selectedItems[kind].forEach((_, id) => {
+        if (!selected.has(id)) state.selectedItems[kind].delete(id);
+      });
+    });
+  }
+  function selectedFavoriteItems() {
+    syncSelectedItemMetadata();
+    const protectedItems = [];
+    ["article", "fund", "fav"].forEach(kind => {
+      state.selectedItems[kind].forEach(entry => {
+        const isSavedInFavorites = kind === "fav" || entry.favorited || isFavoritedAnywhere(entry.item, entry.kind);
+        if (isSavedInFavorites) protectedItems.push(entry);
+      });
+    });
+    return protectedItems;
+  }
+  function deselectItem(entry) {
+    selectionSetFor(entry.kind).delete(entry.id);
+    state.selectedItems[entry.kind].delete(entry.id);
+  }
+
+  const protectedDeleteModal = document.getElementById("protected-delete-modal");
+  const protectedDeleteItemsEl = document.getElementById("protected-delete-items");
+  const protectedDeleteSummaryEl = document.getElementById("protected-delete-summary");
+  let protectedDeleteItems = [];
+  let protectedDeleteLastFocus = null;
+
+  function renderProtectedDeleteItems() {
+    protectedDeleteItemsEl.innerHTML = protectedDeleteItems.map((entry, index) => `
+      <li class="protected-delete-item">
+        <div class="protected-delete-item__content">
+          <span class="protected-delete-item__category">${escapeHtml(entry.category)}</span>
+          <strong>${escapeHtml(selectionItemTitle(entry.item, entry.kind))}</strong>
+        </div>
+        <div class="protected-delete-item__choices" role="group" aria-label="${escapeHtml(selectionItemTitle(entry.item, entry.kind))} 的删除决定">
+          <button type="button" class="protected-delete-choice ${entry.approved ? "" : "is-active"}" data-protected-index="${index}" data-protected-choice="abandon">放弃删除</button>
+          <button type="button" class="protected-delete-choice protected-delete-choice--danger ${entry.approved ? "is-active" : ""}" data-protected-index="${index}" data-protected-choice="proceed">坚持删除</button>
+        </div>
+      </li>`).join("");
+    const protectedCount = protectedDeleteItems.length;
+    const approvedCount = protectedDeleteItems.filter(entry => entry.approved).length;
+    const ordinaryCount = Math.max(0, selectedItemTotal() - protectedCount);
+    const finalDeleteCount = approvedCount + ordinaryCount;
+    protectedDeleteSummaryEl.textContent = `最终确认后将删除：${approvedCount} 项收藏内容、${ordinaryCount} 项未收藏内容。`;
+    const confirmButton = document.getElementById("protected-delete-confirm");
+    confirmButton.disabled = finalDeleteCount === 0;
+    confirmButton.textContent = finalDeleteCount > 0
+      ? `最终确认删除 ${finalDeleteCount} 项`
+      : "没有可删除项";
+  }
+  function openProtectedDeleteModal(items) {
+    protectedDeleteItems = items.map(entry => ({ ...entry, approved: false }));
+    protectedDeleteLastFocus = document.activeElement;
+    renderProtectedDeleteItems();
+    protectedDeleteModal.hidden = false;
+    requestAnimationFrame(() => protectedDeleteModal.querySelector(".protected-delete-choice")?.focus());
+    showToast(`已拦截 ${items.length} 项收藏内容，请逐项确认`, true);
+  }
+  function closeProtectedDeleteModal() {
+    protectedDeleteModal.hidden = true;
+    protectedDeleteItems = [];
+    if (protectedDeleteLastFocus && typeof protectedDeleteLastFocus.focus === "function") {
+      protectedDeleteLastFocus.focus();
+    }
+    protectedDeleteLastFocus = null;
+  }
+  function selectedItemTotal() {
+    return state.selArticles.size + state.selFunds.size + state.selFav.size;
+  }
+  async function refreshCurrentView() {
+    try {
+      if (state.view === "account" && state.currentAccount) {
+        await loadAccountArticles(state.currentAccount, state.currentPage);
+      } else if (state.view === "aggregate") {
+        await loadAggregate(state.currentCategory, state.aggPage);
+      } else if (state.view === "fund") {
+        await loadFunds(state.fundKw, state.fundQ);
+      }
+    } catch (e) {}
+    try { await loadOverview(); } catch (e) {}
+  }
+  async function doBulkDelete(skipFavoriteProtection = false) {
+    if (!skipFavoriteProtection) {
+      const protectedItems = selectedFavoriteItems();
+      if (protectedItems.length) {
+        openProtectedDeleteModal(protectedItems);
+        return;
+      }
+    }
+    if (selectedItemTotal() === 0) {
+      showToast("没有可删除的选中项", true);
+      return;
+    }
+    if (state.view === "favorites") {
+      const fav = loadFavorites();
+      const cat = state.favCat;
+      const key = cat === "公众号" ? "mp" : (cat === "期刊" ? "journal" : "fund");
+      const removeIds = state.selFav;
+      fav[key] = (fav[key] || []).filter(f => !removeIds.has(getFavId(f, cat)));
+      saveFavorites(fav);
+      updateFavCounts();
+      const n = removeIds.size;
+      state.selFav.clear();
+      showToast(`已从私人珍藏移除 ${n} 项`);
+      renderFavoritesList(cat);
+      updateSelectionUI();
+      return;
+    }
+    const articleIds = [...state.selArticles];
+    const fundIds = [...state.selFunds];
+    const articleRecords = articleIds.map(id => {
+      const item = (state.selectedItems.article.get(id) || {}).item || {};
+      return { id, title: item.title, category: item.category, account: item.account, archive_date: item.date };
+    });
+    const fundRecords = fundIds.map(id => {
+      const item = (state.selectedItems.fund.get(id) || {}).item || {};
+      return { id, project_name: item.project_name };
+    });
+    let okCount = 0;
+    try {
+      if (articleIds.length) {
+        const r = await fetchJSON("/api/articles/delete", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ids: articleIds, records: articleRecords }),
+        });
+        okCount += (r.deleted || 0);
+      }
+      if (fundIds.length) {
+        const r = await fetchJSON("/api/funds/delete", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ids: fundIds, records: fundRecords }),
+        });
+        okCount += (r.deleted || 0);
+      }
+      showToast(`已删除 ${okCount} 项`);
+    } catch (e) {
+      showToast("删除失败：" + e.message, true);
+    }
+    clearSelection();
+    await refreshCurrentView();
+    if (_currentSnapDate) loadSnapshot(_currentSnapDate);
+  }
+
+  // 私人珍藏视图
+  const favTabs = $("#fav-tabs");
+  const favList = $("#fav-list");
+  const favEmptyHint = $("#fav-empty-hint");
+
+  function showFavorites(cat) {
+    state.view = "favorites";
+    state.favCat = cat || "公众号";
+    document.querySelectorAll(".page").forEach(p => p.classList.remove("is-visible"));
+    document.querySelector('.page[data-view="favorites"]').classList.add("is-visible");
+    pageEyebrow.textContent = "FAVORITES / COLLECTION";
+    pageTitle.textContent = "私人珍藏";
+    setActiveNav("favorites");
+
+    // 标签高亮
+    favTabs.querySelectorAll(".fav-tab").forEach(t => {
+      t.classList.toggle("is-active", t.dataset.favCat === state.favCat);
+    });
+
+    renderFavoritesList(state.favCat);
+  }
+
+  function renderFavoritesList(cat) {
+    const fav = loadFavorites();
+    const key = cat === "公众号" ? "mp" : (cat === "期刊" ? "journal" : "fund");
+    const items = fav[key] || [];
+
+    if (!items.length) {
+      favList.innerHTML = "";
+      favEmptyHint.hidden = false;
+      return;
+    }
+    favEmptyHint.hidden = true;
+
+    if (cat === "基金") {
+      favList.innerHTML = items.map(f => `
+        <div class="article-row is-favorited" data-fund='${escapeHtml(JSON.stringify(f))}' data-sel-id='${escapeHtml(String(getFavId(f, "基金")))}' data-sel-kind="fav" data-sel-cat="基金">
+          <span class="fav-star-inline">★</span>
+          <div class="article-row__main">
+            <h4>${escapeHtml(f.project_name || "")}</h4>
+            <p class="fund-row__meta">
+              <span>${escapeHtml(f.project_admin || "")} · ${escapeHtml(f.depend_unit || "")}</span>
+              <span>${escapeHtml(f.ratify_year || "")}→结题 ${escapeHtml(f.conclusion_year || "")}</span>
+            </p>
+          </div>
+          <div class="article-row__arrow"><svg><use href="#i-arrow"/></svg></div>
+        </div>`).join("");
+      favList.querySelectorAll(".fund-row, .article-row[data-fund]").forEach(row => {
+        row.addEventListener("click", (e) => handleRowClick(row, e));
+        row.addEventListener("dblclick", () => handleRowDblClick(row));
+      });
+    } else {
+      // 公众号 / 期刊：按日期分组
+      const groups = {};
+      items.forEach(a => { const d = a.date || "未知"; (groups[d] = groups[d] || []).push(a); });
+      favList.innerHTML = Object.entries(groups).map(([date, list]) => `
+        <div class="date-group">
+          <div class="date-group__head"><span class="dot"></span><h3>${formatDateLabel(date)}</h3><span>${list.length} 篇</span></div>
+          ${list.map(a => `
+            <div class="article-row is-favorited" data-article='${escapeHtml(JSON.stringify(a))}' data-sel-id='${escapeHtml(String(getFavId(a, cat)))}' data-sel-kind="fav" data-sel-cat="${escapeHtml(cat)}">
+              <span class="fav-star-inline">★</span>
+              <div class="article-row__time">${formatTime(a.date_published)}</div>
+              <div class="article-row__main">
+                <h4>${escapeHtml(a.title)}</h4>
+                <p class="article-row__subtitle">${escapeHtml(a.title_zh || a.summary || "")}</p>
+              </div>
+              <span class="cat-badge ${catClass(a.category)}">${escapeHtml(a.category || cat)}</span>
+              <div class="article-row__arrow"><svg><use href="#i-arrow"/></svg></div>
+            </div>`).join("")}
+        </div>`).join("");
+      favList.querySelectorAll(".article-row[data-article]").forEach(row => {
+        row.addEventListener("click", (e) => handleRowClick(row, e));
+        row.addEventListener("dblclick", () => handleRowDblClick(row));
+      });
+    }
+    // 收藏页面也启用左滑删除
+    setupSwipeMark("#fav-list", ".article-row", cat);
+  }
+
+  // 标签切换
+  favTabs.addEventListener("click", (e) => {
+    const tab = e.target.closest(".fav-tab");
+    if (!tab) return;
+    showFavorites(tab.dataset.favCat);
+  });
+
+  // 导航更新：在文件总控下面加"私人珍藏"
+  const origRenderNav = renderNav;
+  // 我们需要修改 renderNav 来添加私人珍藏入口。直接重写导航中的按钮生成部分：
+  // （通过覆写 showView 的 meta 来支持 favorites 视图）
+
+  // 更新 showView 支持 favorites
+  const _origShowView = showView;
+  showView = function(view) {
+    state.view = view;
+    state.currentAccount = null;
+    clearSelection();   // 切换顶层视图时清空选择
+    document.querySelectorAll(".page").forEach((p) => p.classList.remove("is-visible"));
+    const page = document.querySelector(`.page[data-view="${view}"]`);
+    if (page) page.classList.add("is-visible");
+    setActiveNav(view);
+    const meta = {
+      dashboard: ["PAPER MAP / 00", "论文观察台"],
+      fund: ["FUND / NSFC", "国自然基金观察"],
+      favorites: ["FAVORITES / COLLECTION", "私人珍藏"],
+    }[view] || ["", ""];
+    pageEyebrow.textContent = meta[0];
+    pageTitle.textContent = meta[1];
+    if (view === "fund") { loadFunds(state.fundKw, state.fundQ); }
+    if (view === "favorites") { showFavorites(state.favCat); }
+  };
+
+  // 初始化滑动标记（在文章渲染后调用）
+  function initSwipeForCurrentView() {
+    requestAnimationFrame(() => {
+      const account = state.accounts.find(item => item.name === state.currentAccount);
+      const accountCategory = (account && account.category) || state.currentCategory || "公众号";
+      setupSwipeMark("#account-articles", ".article-row", accountCategory);
+      setupSwipeMark("#fund-list", ".fund-row", "基金");
+      renderExistingMarks("#account-articles", ".article-row", accountCategory);
+      renderExistingMarks("#fund-list", ".fund-row", "基金");
+    });
+  }
+
+  // 监听视图切换，初始化对应滑动
+  const _origOpenAccount = openAccount;
+  openAccount = function(name) {
+    if (name !== state.currentAccount) clearSelection();
+    _origOpenAccount(name);
+    initSwipeForCurrentView();
+  };
+
+  // 拦截 renderArticlesInto 后初始化滑动
+  const _origRenderArticlesInto = renderArticlesInto;
+  renderArticlesInto = function(container, pageEl, articles) {
+    _origRenderArticlesInto(container, pageEl, articles);
+    // 判断当前容器类型确定 category
+    const cat = container.id === "account-articles"
+      ? ((state.accounts.find(account => account.name === state.currentAccount) || {}).category || state.currentCategory || "公众号")
+      : (container.id === "aggregate-articles" ? state.currentCategory : "公众号");
+    requestAnimationFrame(() => {
+      setupSwipeMark("#" + container.id, ".article-row", cat);
+      renderExistingMarks("#" + container.id, ".article-row", cat);
+    });
+  };
+
+  // 拦截 renderFundList 后初始化滑动
+  const _origRenderFundList = renderFundList;
+  renderFundList = function(funds, data) {
+    _origRenderFundList(funds, data);
+    requestAnimationFrame(() => {
+      setupSwipeMark("#fund-list", ".fund-row", "基金");
+      renderExistingMarks("#fund-list", ".fund-row", "基金");
+    });
+  };
+
+  // ===== 批量删除工具条 =====
+  const bulkBar = document.getElementById("bulk-delete-bar");
+  if (bulkBar) {
+    document.getElementById("bulk-delete-btn").addEventListener("click", () => doBulkDelete());
+    document.getElementById("bulk-continuous-selection").addEventListener("click", () => {
+      state.continuousSelection = !state.continuousSelection;
+      updateSelectionUI();
+      showToast(state.continuousSelection
+        ? "连续删除已开启：直接点击卡片即可累加选择"
+        : "连续删除已关闭");
+    });
+    document.getElementById("bulk-clear-sel").addEventListener("click", () => clearSelection());
+  }
+
+  if (protectedDeleteModal) {
+    protectedDeleteItemsEl.addEventListener("click", (e) => {
+      const button = e.target.closest("[data-protected-index]");
+      if (!button) return;
+      const entry = protectedDeleteItems[Number(button.dataset.protectedIndex)];
+      if (!entry) return;
+      entry.approved = button.dataset.protectedChoice === "proceed";
+      renderProtectedDeleteItems();
+    });
+    const cancelProtectedDelete = () => closeProtectedDeleteModal();
+    document.getElementById("protected-delete-close").addEventListener("click", cancelProtectedDelete);
+    document.getElementById("protected-delete-cancel").addEventListener("click", cancelProtectedDelete);
+    protectedDeleteModal.querySelector("[data-protected-delete-close]").addEventListener("click", cancelProtectedDelete);
+    document.getElementById("protected-delete-confirm").addEventListener("click", async () => {
+      const abandoned = protectedDeleteItems.filter(entry => !entry.approved);
+      abandoned.forEach(deselectItem);
+      closeProtectedDeleteModal();
+      updateSelectionUI();
+      if (selectedItemTotal() === 0) {
+        showToast("已放弃删除全部收藏内容");
+        return;
+      }
+      // 未收藏项此刻才会进入删除流程，是否删除取决于上方最终确认。
+      await doBulkDelete(true);
+    });
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && !protectedDeleteModal.hidden) cancelProtectedDelete();
+    });
+  }
+
+  // ===== 每日快照 =====
+  const snapBody = $("#snapshot-body");
+  const snapDateSelect = $("#snapshot-date-select");
+  const snapRefreshBtn = $("#snapshot-refresh-btn");
+  const deletionAuditBody = $("#deletion-audit-body");
+  const deletionAuditDate = $("#deletion-audit-date");
+  let _snapDates = [];       // 可用快照日期列表
+  let _currentSnapDate = ""; // 当前显示的快照日期
+
+  async function loadSnapshot(targetDate) {
+    try {
+      // 1) 加载日期列表（填充 select）
+      const list = await fetchJSON("/api/snapshots");
+      _snapDates = list.dates || [];
+      _currentSnapDate = targetDate || (_snapDates[0] || "");
+
+      // 填充日期选择器
+      snapDateSelect.innerHTML = _snapDates.length
+        ? _snapDates.map(d => `<option value="${d}" ${d === _currentSnapDate ? "selected" : ""}>${d}</option>`).join("")
+        : '<option value="">暂无快照</option>';
+
+      // 2) 加载具体快照数据
+      if (!_currentSnapDate) {
+        renderSnapshotEmpty();
+        renderDeletionAuditEmpty();
+        return;
+      }
+      const snap = await fetchJSON(`/api/snapshots/${_currentSnapDate}`);
+      renderSnapshot(snap);
+      await loadDeletionAudit(_currentSnapDate, snap);
+    } catch (e) {
+      snapBody.innerHTML = `<p class="snap-no-fetch">加载快照失败：${escapeHtml(e.message)}</p>`;
+      renderDeletionAuditError(e);
+    }
+  }
+
+  function renderSnapshot(s) {
+    if (!s.fetched) {
+      snapBody.innerHTML = `
+        <div class="snap-no-fetch">
+          <p><strong>${s.date || "今日"}</strong> 尚未执行拉取</p>
+          <p style="margin-top:6px;font-size:.8rem;color:var(--ink-400)">点击右上角「现场抓取」开始今日论文采集</p>
+        </div>`;
+      return;
+    }
+
+    const mpTags = s.mp_sources && s.mp_sources.length
+      ? s.mp_sources.map(n => `<span class="snap-tag snap-tag--mp"><svg width="12" height="12" viewBox="0 0 24 24"><use href="#i-paper"/></svg>${escapeHtml(n)}</span>`).join("")
+      : `<span class="snap-tag snap-tag--none">无</span>`;
+    const jnlTags = s.journal_sources && s.journal_sources.length
+      ? s.journal_sources.map(n => `<span class="snap-tag snap-tag--journal"><svg width="12" height="12" viewBox="0 0 24 24"><use href="#i-search"/></svg>${escapeHtml(n)}</span>`).join("")
+      : `<span class="snap-tag snap-tag--none">无</span>`;
+    const fundTags = s.fund_keywords && s.fund_keywords.length
+      ? s.fund_keywords.slice(0, 10).map(k => `<span class="snap-tag snap-tag--fund">${escapeHtml(k)}</span>`).join("")
+          + (s.fund_keywords.length > 10 ? `<span class="snap-tag snap-tag--fund">+${s.fund_keywords.length - 10}</span>` : "")
+      : `<span class="snap-tag snap-tag--none">0</span>`;
+
+    snapBody.innerHTML = `
+      <div class="snap-grid">
+        <div class="snap-card">
+          <div class="snap-card__label">论文总数</div>
+          <div class="snap-card__value snap-card__value--accent">${s.total_articles || 0}</div>
+        </div>
+        <div class="snap-card">
+          <div class="snap-card__label">公众号</div>
+          <div class="snap-card__value">${s.mp_count || 0}</div>
+          <div class="snap-card__sub">${s.mp_sources ? s.mp_sources.length : 0} 个来源</div>
+        </div>
+        <div class="snap-card">
+          <div class="snap-card__label">期刊</div>
+          <div class="snap-card__value">${s.journal_count || 0}</div>
+          <div class="snap-card__sub">${s.journal_sources ? s.journal_sources.length : 0} 个来源</div>
+        </div>
+        <div class="snap-card">
+          <div class="snap-card__label">基金项目</div>
+          <div class="snap-card__value">${s.fund_count || 0}</div>
+          <div class="snap-card__sub">${s.fund_keywords ? s.fund_keywords.length : 0} 个关键词</div>
+        </div>
+      </div>
+      <div class="snap-sources">
+        <div class="snap-sources-row" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px">
+          <div>
+            <div class="snap-sources__title">📱 公众号来源</div>
+            <div class="snap-tags">${mpTags}</div>
+          </div>
+          <div>
+            <div class="snap-sources__title">📰 期刊来源</div>
+            <div class="snap-tags">${jnlTags}</div>
+          </div>
+          <div>
+            <div class="snap-sources__title">💰 基金关键词</div>
+            <div class="snap-tags">${fundTags}</div>
+          </div>
+        </div>
+      </div>`;
+  }
+
+  function renderSnapshotEmpty() {
+    snapBody.innerHTML = `<div class="snap-no-fetch"><p>暂无任何快照记录。</p><p style="margin-top:6px;font-size:.8rem;color:var(--ink-400)">执行一次「现场抓取」后将自动生成。</p></div>`;
+  }
+
+  async function loadDeletionAudit(date, snapshot) {
+    deletionAuditBody.innerHTML = `<p class="snapshot-loading">读取删除记录…</p>`;
+    try {
+      const audit = await fetchJSON(`/api/deletion-audit?date=${encodeURIComponent(date)}`);
+      renderDeletionAudit(audit, snapshot);
+    } catch (e) {
+      renderDeletionAuditError(e);
+    }
+  }
+  function renderDeletionAudit(audit, snapshot) {
+    const fetchedArticles = Number(snapshot && snapshot.total_articles) || 0;
+    const sameArchiveDeleted = Number(audit.same_archive_article_count) || 0;
+    const remainingArticles = Math.max(0, fetchedArticles - sameArchiveDeleted);
+    deletionAuditDate.textContent = `${formatDateLabel(audit.date)} · 与上方拉取快照对账`;
+    const recent = audit.recent || [];
+    const recentHtml = recent.length
+      ? `<div class="deletion-audit-recent"><span>最近删除</span>${recent.map(item => `<span class="deletion-audit-recent__item">${escapeHtml(item.category || "内容")} · ${escapeHtml(item.title || "未命名项目")}</span>`).join("")}</div>`
+      : `<p class="deletion-audit-empty">本日尚无删除记录。最终确认删除后会自动登记在这里。</p>`;
+    deletionAuditBody.innerHTML = `
+      <div class="deletion-audit-grid">
+        <div class="deletion-audit-card"><span>当日拉取论文</span><strong>${fetchedArticles}</strong><small>来自上方快照</small></div>
+        <div class="deletion-audit-card deletion-audit-card--danger"><span>当日归档删除</span><strong>${sameArchiveDeleted}</strong><small>同一归档日的文章</small></div>
+        <div class="deletion-audit-card deletion-audit-card--result"><span>对账后论文保留</span><strong>${remainingArticles}</strong><small>拉取减同日删除</small></div>
+        <div class="deletion-audit-card"><span>今日删除操作</span><strong>${audit.total || 0}</strong><small>文章 ${audit.article_count || 0} · 基金 ${audit.fund_count || 0}</small></div>
+      </div>
+      ${recentHtml}`;
+  }
+  function renderDeletionAuditEmpty() {
+    deletionAuditDate.textContent = "暂无可对账日期";
+    deletionAuditBody.innerHTML = `<p class="deletion-audit-empty">生成每日拉取快照后，删除对账会显示在这里。</p>`;
+  }
+  function renderDeletionAuditError(error) {
+    deletionAuditDate.textContent = "删除记录暂不可用";
+    deletionAuditBody.innerHTML = `<p class="deletion-audit-empty">删除对账加载失败：${escapeHtml(error.message || String(error))}</p>`;
+  }
+
+  // 日期切换
+  if (snapDateSelect) {
+    snapDateSelect.addEventListener("change", () => {
+      loadSnapshot(snapDateSelect.value);
+    });
+  }
+  // 手动刷新按钮
+  if (snapRefreshBtn) {
+    snapRefreshBtn.addEventListener("click", () => { loadSnapshot(_currentSnapDate); });
+  }
 
   // ===== 启动 =====
   checkHealth();

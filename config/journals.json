@@ -17,63 +17,66 @@
     },
     {
       "name": "Nature Water",
-      "rss": "https://www.nature.com/subjects/water.rss",
+      "rss": "https://www.nature.com/natwater.rss",
       "publisher": "Nature",
-      "note": "使用 Nature 水领域主题 RSS（Nature Water 期刊独立 RSS 在本环境 404）"
+      "note": "2026-08-15 实测可用（200 + RSS-XML），曾因 subjects/water.rss 404 被错标为不可用"
     },
     {
       "name": "Environmental Science & Technology",
-      "rss": "https://pubs.acs.org/journal/esthag/rss",
+      "source_type": "crossref",
+      "issn": "0013-936X",
       "publisher": "ACS",
-      "note": "本机网络被出版商拦截(000/超时)"
+      "note": "ACS RSS 在新平台返回 403；改用 Crossref 公开 DOI 元数据"
     },
     {
       "name": "Water Research",
-      "rss": "https://www.sciencedirect.com/journal/water-research/rss",
+      "rss": "https://rss.sciencedirect.com/publication/science/00431354",
       "publisher": "ScienceDirect",
-      "note": "本机网络被出版商拦截(403)"
+      "note": "ScienceDirect 官方 publication RSS（ISSN 0043-1354）"
     },
     {
       "name": "Journal of Membrane Science",
-      "rss": "https://www.sciencedirect.com/journal/journal-of-membrane-science/rss",
+      "rss": "https://rss.sciencedirect.com/publication/science/03767388",
       "publisher": "ScienceDirect",
-      "note": "本机网络被出版商拦截(403)，需在可访问网络/配置 proxy 后自动解锁"
+      "note": "ScienceDirect 官方 publication RSS（ISSN 0376-7388）"
     },
     {
       "name": "Desalination",
-      "rss": "https://www.sciencedirect.com/journal/desalination/rss",
+      "rss": "https://rss.sciencedirect.com/publication/science/00119164",
       "publisher": "ScienceDirect",
-      "note": "本机网络被出版商拦截(403)"
+      "note": "ScienceDirect 官方 publication RSS（ISSN 0011-9164）"
     },
     {
       "name": "Separation and Purification Technology",
-      "rss": "https://www.sciencedirect.com/journal/separation-and-purification-technology/rss",
+      "rss": "https://rss.sciencedirect.com/publication/science/13835866",
       "publisher": "ScienceDirect",
-      "note": "本机网络被出版商拦截(403)"
+      "note": "ScienceDirect 官方 publication RSS（ISSN 1383-5866）"
     },
     {
       "name": "npj Clean Water",
-      "rss": "https://www.nature.com/njcleanwater.rss",
+      "rss": "https://www.nature.com/npjcleanwater.rss",
       "publisher": "Nature",
-      "note": "期刊独立 RSS 在本环境 404，待核实正确地址"
+      "note": "2026-08-15 实测可用（200 + RSS-XML），曾因 URL 配置错误被错标为不可用"
     },
     {
       "name": "ACS ES&T Water",
-      "rss": "https://pubs.acs.org/journal/estwcu/rss",
+      "source_type": "crossref",
+      "issn": "2690-0637",
       "publisher": "ACS",
-      "note": "本机网络被出版商拦截/地址待核实"
+      "note": "ACS RSS 在新平台返回 403；改用 Crossref 公开 DOI 元数据"
     },
     {
       "name": "Journal of Water Process Engineering",
-      "rss": "https://www.sciencedirect.com/journal/journal-of-water-process-engineering/rss",
+      "rss": "https://rss.sciencedirect.com/publication/science/22147144",
       "publisher": "ScienceDirect",
-      "note": "本机网络被出版商拦截(403)"
+      "note": "ScienceDirect 官方 publication RSS（ISSN 2214-7144）"
     },
     {
       "name": "Membranes",
-      "rss": "https://www.mdpi.com/journal/membranes/rss",
+      "source_type": "crossref",
+      "issn": "2077-0375",
       "publisher": "MDPI",
-      "note": "本机网络被出版商拦截(403)"
+      "note": "MDPI RSS 返回 403；改用 Crossref 公开 DOI 元数据"
     },
     {
       "name": "arXiv·膜与分离预印本",

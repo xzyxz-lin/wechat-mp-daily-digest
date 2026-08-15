@@ -116,6 +116,9 @@ def _parse_date(s):
         "%Y-%m-%dT%H:%M:%SZ",
         "%Y-%m-%dT%H:%M:%S.%f%z",
         "%Y-%m-%dT%H:%M:%S.%fZ",
+        "%d %B %Y",
+        "%d %b %Y",
+        "%B %d, %Y",
         "%Y-%m-%d",
     ]
     for fmt in fmts:
@@ -128,6 +131,20 @@ def _parse_date(s):
         return datetime.fromisoformat(s.replace("Z", "+00:00"))
     except ValueError:
         return None
+
+
+def _date_from_description(text):
+    """提取 ScienceDirect RSS 写在 description 内的 Publication date。"""
+    import html
+    import re
+
+    plain = re.sub(r"<[^>]+>", " ", html.unescape(text or ""))
+    match = re.search(
+        r"publication\s+date\s*:\s*(.+?)(?=\s*(?:source|author\(s\))\s*:|$)",
+        plain,
+        flags=re.IGNORECASE,
+    )
+    return match.group(1).strip() if match else ""
 
 
 def _text(el):
@@ -212,8 +229,10 @@ def parse_feed(xml_text, journal_name):
         title = _find_text(it, ["title"])
         title = clean_latex(title)  # 清理 arXiv 等源标题中的 LaTeX 标记
         link = _find_link(it)
-        pub_raw = _find_text(it, ["pubDate", "published", "updated", "date", "dc:date"])
         summary = _find_text(it, ["description", "summary", "content", "content:encoded", "encoded"])
+        pub_raw = _find_text(it, ["pubDate", "published", "updated", "date", "dc:date"])
+        if not pub_raw:
+            pub_raw = _date_from_description(summary)
         guid = _find_text(it, ["guid", "id", "link"]) or link
         if not title:
             continue
@@ -233,9 +252,110 @@ def parse_feed(xml_text, journal_name):
     return articles
 
 
-def fetch_one(journal, target_date, proxy=None, timeout=25):
-    """抓取单个期刊 feed，返回 target_date(北京) 当天发布的文章列表。"""
+def _crossref_date(work):
+    """从 Crossref work 中提取最可靠的发布日期。"""
+    for field in ("published-online", "published-print", "published", "issued", "created"):
+        parts = (work.get(field) or {}).get("date-parts") or []
+        if not parts or not parts[0]:
+            continue
+        try:
+            values = parts[0]
+            return datetime(
+                int(values[0]),
+                int(values[1]) if len(values) > 1 else 1,
+                int(values[2]) if len(values) > 2 else 1,
+                tzinfo=BEIJING,
+            )
+        except (ValueError, TypeError, IndexError):
+            continue
+    return None
+
+
+def fetch_crossref_one(journal, target_date, proxy=None, timeout=25,
+                       seen_urls=None, lookback_days=7):
+    """用 Crossref 公开元数据补齐已取消或拦截 RSS 的出版商期刊。"""
+    from datetime import timedelta
+
     name = journal.get("name", "未知期刊")
+    issn = (journal.get("issn") or "").strip()
+    if not issn:
+        print(f"[journals] {name} 未配置 Crossref ISSN，跳过")
+        return []
+
+    cutoff = target_date - timedelta(days=lookback_days)
+    params = {
+        "filter": f"from-pub-date:{cutoff.isoformat()},until-pub-date:{target_date.isoformat()}",
+        "sort": "published",
+        "order": "desc",
+        "rows": 100,
+        "select": "DOI,title,URL,published-online,published-print,published,issued,abstract",
+    }
+    try:
+        resp = requests.get(
+            f"https://api.crossref.org/journals/{issn}/works",
+            params=params,
+            headers={**_HEADERS, "User-Agent": "Paper Observatory Crossref metadata fetcher (mailto:local@example.invalid)"},
+            timeout=timeout,
+            proxies={"http": proxy, "https": proxy} if proxy else None,
+        )
+        if resp.status_code != 200:
+            print(f"[journals] {name} Crossref HTTP {resp.status_code}，跳过")
+            return []
+        works = (resp.json().get("message") or {}).get("items") or []
+    except Exception as e:
+        print(f"[journals] {name} Crossref 抓取失败: {e}")
+        return []
+
+    kept = []
+    for work in works:
+        title_parts = work.get("title") or []
+        title = clean_latex(title_parts[0] if title_parts else "")
+        pub = _crossref_date(work)
+        doi = (work.get("DOI") or "").strip()
+        url = (work.get("URL") or (f"https://doi.org/{doi}" if doi else "")).strip()
+        if not title or not pub:
+            continue
+        local_d = _local_date(pub)
+        if local_d < cutoff or local_d > target_date:
+            continue
+        if seen_urls and url and url in seen_urls:
+            continue
+        abstract = (work.get("abstract") or "").strip()
+        kept.append({
+            "account": name,
+            "category": "期刊",
+            "title": title,
+            "url": url,
+            "image": "",
+            "date_published": pub.isoformat(),
+            "content_html": "",
+            "summary": (abstract or title)[:300],
+            "id": doi or url or title,
+        })
+    print(f"[journals] {name}: Crossref 共 {len(works)} 篇，窗口内新增 {len(kept)} 篇")
+    return kept
+
+
+def fetch_one(journal, target_date, proxy=None, timeout=25, seen_urls=None, lookback_days=7):
+    """抓取单个期刊 feed，返回未在 seen_urls 中的近期文章列表。
+
+    Args:
+        seen_urls: 已存档文章的 URL 集合（用于去重），None 表示不去重
+        lookback_days: 只抓取发布日期在过去 N 天内的文章（默认 7 天，
+                       覆盖周更期刊的发布节奏 + 旧 RSS 项）
+
+    修复历史：
+        原版用严格日期匹配（_local_date == target_date），导致周更期刊
+        （Nature Communications 等）昨日发布的文章被全部漏掉。
+        改为「近期窗口 + URL 去重」：只要 RSS 里有的近期文章、且本地没有，
+        都视为新增。
+    """
+    from datetime import timedelta
+
+    name = journal.get("name", "未知期刊")
+    if journal.get("source_type", "rss").lower() == "crossref":
+        return fetch_crossref_one(journal, target_date, proxy=proxy, timeout=timeout,
+                                  seen_urls=seen_urls, lookback_days=lookback_days)
     url = journal.get("rss", "")
     if not url:
         print(f"[journals] {name} 无 RSS 地址，跳过")
@@ -247,21 +367,97 @@ def fetch_one(journal, target_date, proxy=None, timeout=25):
             print(f"[journals] {name} HTTP {resp.status_code}（可能被出版商拦截），跳过")
             return []
         arts = parse_feed(resp.text, name)
-        today = [a for a in arts if a.get("_pub_date") and _local_date(a["_pub_date"]) == target_date]
-        # 清理内部字段
-        for a in today:
+
+        # 近期窗口 + 去重过滤
+        cutoff = target_date - timedelta(days=lookback_days)
+        kept = []
+        skipped_old = 0
+        skipped_dup = 0
+        skipped_no_date = 0
+        for a in arts:
+            pub = a.get("_pub_date")
+            if not pub:
+                skipped_no_date += 1
+                continue
+            local_d = _local_date(pub)
+            if local_d < cutoff:
+                skipped_old += 1
+                continue
+            url_key = a.get("url") or a.get("id") or ""
+            if seen_urls and url_key and url_key in seen_urls:
+                skipped_dup += 1
+                continue
+            # 保留这篇
             a.pop("_pub_date", None)
-        print(f"[journals] {name}: feed 共 {len(arts)} 篇，{target_date} 当天 {len(today)} 篇")
-        return today
+            kept.append(a)
+
+        print(f"[journals] {name}: feed 共 {len(arts)} 篇 "
+              f"(窗口内新增 {len(kept)} | 过旧 {skipped_old} | 已存档 {skipped_dup} | 无日期 {skipped_no_date})")
+        return kept
     except Exception as e:
         print(f"[journals] {name} 抓取失败: {e}")
         return []
 
 
-def fetch_daily(config, target_date=None):
-    """主入口：抓取所有期刊，返回 target_date(北京) 当天发布的文章列表。
+def _load_seen_urls(target_date):
+    """从本地存档目录加载已见文章 URL 集合（用于期刊去重）。
+
+    扫描 [target_date - 30 天, target_date] 范围内所有 articles.json，
+    收集所有 url / id / link 字段作为 seen set。
+    """
+    from datetime import timedelta
+
+    # 从 config.json 读取本地存档目录（与 daily.py 一致）
+    cfg_path = PROJECT_DIR / "config" / "config.json"
+    if cfg_path.exists():
+        try:
+            with open(cfg_path, "r", encoding="utf-8") as f:
+                cfg = json.load(f)
+        except Exception:
+            cfg = {}
+    else:
+        cfg = {}
+    archive_dir = Path(cfg.get("output", {}).get("local_dir", str(PROJECT_DIR / "每日论文推送")))
+    if not archive_dir.is_dir():
+        return set()
+
+    seen: set[str] = set()
+    cutoff = target_date - timedelta(days=30)
+    for day_dir in sorted(archive_dir.iterdir(), reverse=True):
+        if not day_dir.is_dir():
+            continue
+        jp = day_dir / "articles.json"
+        if not jp.exists():
+            continue
+        # 解析目录名 YYYY.M.D → date 对象
+        try:
+            parts = day_dir.name.split(".")
+            if len(parts) == 3:
+                d = date(int(parts[0]), int(parts[1]), int(parts[2]))
+                if d < cutoff:
+                    break  # 太旧了，没必要再扫
+        except Exception:
+            continue
+        try:
+            arts = json.load(open(jp, "r", encoding="utf-8"))
+            for a in arts:
+                for key in ("url", "id", "link"):
+                    v = a.get(key)
+                    if v:
+                        seen.add(v)
+        except Exception:
+            continue
+    return seen
+
+
+def fetch_daily(config, target_date=None, lookback_days=7):
+    """主入口：抓取所有期刊，返回 target_date 前后 N 天内未存档的新文章列表。
 
     每篇文章附带 title_zh（中文翻译标题），翻译失败时保留原文。
+
+    修复：原版只取 pubDate == target_date 的文章，导致周更期刊漏掉。
+    现在改为「近期窗口 + URL 去重」，能稳定抓到 Nature Communications 等
+    期刊最新一周内发布的所有文章。
     """
     target_date = target_date or date.today()
     journals = load_journals()
@@ -269,10 +465,16 @@ def fetch_daily(config, target_date=None):
         return []
     proxy = (config.get("journals_proxy") or "").strip() or None
 
-    print(f"\n[journals] 抓取期刊（{target_date} 北京时间），共 {len(journals)} 个源")
+    # 加载已存档 URL（避免重复入库）
+    seen = _load_seen_urls(target_date)
+    print(f"[journals] 本地存档共 {len(seen)} 个 URL（去重基准）")
+
+    window_start = target_date - timedelta(days=lookback_days)
+    print(f"\n[journals] 抓取期刊（窗口：{window_start} ~ {target_date}，北京时间），共 {len(journals)} 个源")
     result = []
     for j in journals:
-        result.extend(fetch_one(j, target_date, proxy=proxy))
+        result.extend(fetch_one(j, target_date, proxy=proxy,
+                                seen_urls=seen, lookback_days=lookback_days))
         time.sleep(0.3)  # 礼貌性限速，避免被封
 
     # 批量翻译标题
@@ -289,7 +491,7 @@ def fetch_daily(config, target_date=None):
             for a in result:
                 a["title_zh"] = a.get("title", "")
 
-    print(f"[journals] 当天期刊论文合计 {len(result)} 篇")
+    print(f"[journals] 本次新增期刊论文合计 {len(result)} 篇")
     return result
 
 

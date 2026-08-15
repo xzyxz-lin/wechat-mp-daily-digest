@@ -12,6 +12,7 @@ import sys
 import time
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
+from urllib.parse import urlparse
 
 import requests
 
@@ -43,10 +44,17 @@ def fetch_all(base_url, auth_code=None, retries=10, retry_delay=15, limit=2000):
     headers = {}
     if auth_code:
         headers["Authorization"] = f"Bearer {auth_code}"
+    # WeWe RSS runs on this computer.  A system HTTP(S) proxy must not receive
+    # localhost traffic; otherwise it can return 502 before the request reaches
+    # the local Docker container.  External RSS requests keep their proxy setup.
+    host = (urlparse(base_url).hostname or "").lower()
+    session = requests.Session()
+    if host in {"localhost", "127.0.0.1", "::1"}:
+        session.trust_env = False
     last_err = None
     for i in range(retries):
         try:
-            resp = requests.get(url, headers=headers, timeout=20)
+            resp = session.get(url, headers=headers, timeout=20)
             resp.raise_for_status()
             return resp.json()
         except requests.exceptions.RequestException as e:

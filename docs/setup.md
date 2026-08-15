@@ -30,7 +30,7 @@ https://www.docker.com/products/docker-desktop/
 ## 二、WeWe RSS 启动
 
 ```bash
-cd "A:\workbuddy项目\推送公众号论文\wewe-rss"
+cd "A:\workbuddy项目\论文观察台\wewe-rss"
 docker-compose -f docker-compose.sqlite.yml up -d
 ```
 
@@ -88,7 +88,7 @@ curl http://localhost:4000/feeds/all.json | python -c "import json,sys; d=json.l
 ## 六、Python 依赖安装
 
 ```bash
-cd "A:\workbuddy项目\推送公众号论文\scripts"
+cd "A:\workbuddy项目\论文观察台\scripts"
 python -m venv .venv
 .venv\Scripts\activate
 pip install -r requirements.txt
@@ -97,7 +97,7 @@ pip install -r requirements.txt
 ## 七、首次手动测试
 
 ```bash
-cd "A:\workbuddy项目\推送公众号论文\scripts"
+cd "A:\workbuddy项目\论文观察台\scripts"
 python daily.py
 ```
 

@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light">
   <title>Paper Observatory · 论文观察台</title>
-  <link rel="stylesheet" href="/paper_observatory.css">
+  <link rel="stylesheet" href="/paper_observatory.css?v=20260815-collection-guard-2">
 </head>
 <body>
   <a class="skip-link" href="#main-content">跳到主要内容</a>
@@ -23,6 +23,8 @@
     <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 6.5h7l2 2h9v10H3z"/></symbol>
     <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></symbol>
     <symbol id="i-fund" viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-7M21 20H3"/></symbol>
+    <symbol id="i-star" viewBox="0 0 24 24"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></symbol>
+    <symbol id="i-star-filled" viewBox="0 0 24 24"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" fill="currentColor"/></symbol>
   </svg>
 
   <div class="app-shell">
@@ -79,6 +81,27 @@
         </div>
       </div>
 
+      <!-- 私人珍藏 -->
+      <section class="page" data-view="favorites" aria-labelledby="page-title">
+        <div class="section-intro">
+          <div><span id="fav-kicker">FAVORITES / COLLECTION</span><h3 id="fav-page-title">私人珍藏</h3></div>
+          <p id="fav-desc">你标记的重点内容，按来源分类收藏。</p>
+        </div>
+        <div class="fav-tabs" id="fav-tabs">
+          <button class="fav-tab is-active" data-fav-cat="公众号" type="button">
+            <svg><use href="#i-paper"/></svg><span>公众号收藏</span><b id="fav-mp-count">0</b>
+          </button>
+          <button class="fav-tab" data-fav-cat="期刊" type="button">
+            <svg><use href="#i-search"/></svg><span>期刊论文收藏</span><b id="fav-journal-count">0</b>
+          </button>
+          <button class="fav-tab" data-fav-cat="基金" type="button">
+            <svg><use href="#i-fund"/></svg><span>基金收藏</span><b id="fav-fund-count">0</b>
+          </button>
+        </div>
+        <div class="fav-list" id="fav-list"></div>
+        <p class="fav-empty-hint" id="fav-empty-hint" hidden>暂无收藏内容。在文章列表或基金列表中<strong>向右滑动</strong>即可标记收藏。</p>
+      </section>
+
       <!-- 文件总控 -->
       <section class="page is-visible" data-view="dashboard" aria-labelledby="page-title">
         <div class="atlas-hero">
@@ -90,6 +113,42 @@
           <div class="topology" id="topology" aria-label="信息源拓扑摘要"></div>
         </div>
         <div class="metric-strip" id="metric-strip"></div>
+
+        <!-- 每日快照 -->
+        <div class="snapshot-panel" id="snapshot-panel">
+          <div class="snapshot-panel__head">
+            <div>
+              <span class="snapshot-panel__kicker">DAILY SNAPSHOT / 每日快照</span>
+              <h4>今日拉取状态</h4>
+            </div>
+            <div class="snapshot-panel__picker">
+              <label>切换日期
+                <select id="snapshot-date-select"></select>
+              </label>
+              <button class="scan-button scan-button--ghost scan-button--sm" id="snapshot-refresh-btn" type="button" title="刷新快照">
+                <svg><use href="#i-refresh"/></svg>
+              </button>
+            </div>
+          </div>
+          <div class="snapshot-panel__body" id="snapshot-body">
+            <p class="snapshot-loading">加载中…</p>
+          </div>
+        </div>
+
+        <!-- 每日删除对账：与上方同一操作日的拉取快照对照 -->
+        <div class="deletion-audit-panel" id="deletion-audit-panel" aria-labelledby="deletion-audit-title">
+          <div class="deletion-audit-panel__head">
+            <div>
+              <span class="snapshot-panel__kicker">DAILY DELETION / 删除对账</span>
+              <h4 id="deletion-audit-title">今日删除对账</h4>
+            </div>
+            <p id="deletion-audit-date" class="deletion-audit-panel__date">等待加载…</p>
+          </div>
+          <div class="deletion-audit-panel__body" id="deletion-audit-body" aria-live="polite">
+            <p class="snapshot-loading">读取删除记录…</p>
+          </div>
+        </div>
+
         <div class="section-heading"><div><span>FILE CONTROL</span><h3>文件总控 · 信息源概览</h3></div><p>公众号、期刊、基金三类信息源的状态一览。</p></div>
         <div class="dashboard-cards" id="dashboard-cards"></div>
       </section>
@@ -113,6 +172,10 @@
         <div class="section-intro">
           <div><span id="fund-kicker">FUND / NSFC</span><h3 id="fund-page-title">国自然基金观察</h3></div>
           <p id="fund-desc">结题项目 + 成果论文，数据源：国家自然科学基金大数据知识管理服务门户。</p>
+          <button class="scan-button scan-button--fund" id="funds-fetch-button" type="button" aria-label="抓取国自然基金数据">
+            <svg><use href="#i-refresh"/></svg><span id="funds-fetch-text">抓取基金数据</span>
+          </button>
+          <span id="funds-fetch-status" class="funds-fetch-status"></span>
         </div>
         <div class="fund-toolbar" id="fund-toolbar">
           <div class="fund-filters" id="fund-filters"></div>
@@ -123,45 +186,25 @@
         </div>
         <div class="fund-list" id="fund-list"></div>
 
-        <!-- 获批/资助项目查询（需手动验证码） -->
+        <!-- 获批/资助项目查询（嵌入国自然官方页面） -->
         <div class="support-query" id="support-query">
-          <div class="section-heading"><div><span>SUPPORT QUERY</span><h3>获批 / 资助项目查询</h3></div><p>查询国家自然科学基金获批/资助项目（需输入图形验证码）。</p></div>
-          <div class="support-form" id="support-form">
-            <div class="support-captcha-row">
-              <div class="captcha-box" id="captcha-box">
-                <img id="captcha-img" src="" alt="验证码" />
-                <button type="button" id="captcha-refresh" title="刷新验证码">↻</button>
-                <p class="captcha-hint" id="captcha-hint">点击「刷新验证码」获取</p>
-              </div>
-              <input type="text" id="captcha-input" placeholder="输入图中验证码" maxlength="6" autocomplete="off" aria-label="验证码" />
+          <div class="section-heading"><div><span>SUPPORT QUERY</span><h3>获批 / 资助项目查询</h3></div><p>通过国家自然科学基金官方门户查询获批/资助项目（需在下方页面中登录并输入验证码）。</p></div>
+          <div class="support-iframe-wrap">
+            <div class="support-iframe-toolbar">
+              <span class="support-iframe-hint">↓ 官方查询页面（验证码在原站正常加载）</span>
+              <a class="support-iframe-link" href="https://kd.nsfc.cn/#/fundingInit" target="_blank" rel="noopener">在新标签页打开 ↗</a>
             </div>
-            <div class="support-fields">
-              <input type="text" id="sq-keyword" placeholder="关键词（如：膜、反渗透）" value="膜" />
-              <input type="text" id="sq-person" placeholder="负责人（可选）" />
-              <input type="text" id="sq-unit" placeholder="依托单位（可选）" />
-              <div class="sq-year-range">
-                <input type="number" id="sq-year-start" placeholder="起始年" value="2020" min="1986" max="2030" />
-                <span>—</span>
-                <input type="number" id="sq-year-end" placeholder="截止年" value="2025" min="1986" max="2030" />
-              </div>
-            </div>
-            <div class="support-actions">
-              <button type="button" id="sq-submit" class="btn-primary">查询</button>
-              <span id="sq-status" class="sq-status"></span>
-            </div>
+            <iframe
+              id="nsfc-iframe"
+              class="support-iframe"
+              src="https://kd.nsfc.cn/#/fundingInit"
+              sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-top-navigation"
+              loading="lazy"
+              referrerpolicy="no-referrer"
+              title="国家自然科学基金获批项目查询"
+            ></iframe>
           </div>
-          <div class="support-results" id="support-results" hidden>
-            <div class="support-results-header">
-              <span id="support-count"></span>
-              <button type="button" id="support-export" class="btn-secondary">导出结果</button>
-            </div>
-            <table class="support-table" id="support-table">
-              <thead><tr><th>项目名称</th><th>负责人</th><th>依托单位</th><th>金额(万)</th><th>批准年度</th><th>类型</th></tr></thead>
-              <tbody id="support-tbody"></tbody>
-            </table>
-          </div>
-          <div class="support-error" id="support-error" hidden></div>
-          <p class="support-note">数据来源：<a href="http://output.nsfc.gov.cn/projectQuery" target="_blank" rel="noopener">output.nsfc.gov.cn（国家自然科学基金）</a> · 验证码由国自然官方生成，本站仅代理转发</p>
+          <p class="support-note">数据来源：<a href="https://kd.nsfc.cn" target="_blank" rel="noopener">kd.nsfc.gov.cn（国家自然科学基金大数据知识管理服务门户）</a> · 嵌入官方页面，验证码原生加载</p>
         </div>
       </section>
     </main>
@@ -189,6 +232,27 @@
 
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
+  <!-- 收藏保护：删除已收藏内容前必须逐项确认 -->
+  <div id="protected-delete-modal" class="protected-delete-modal" hidden>
+    <div class="protected-delete-modal__backdrop" data-protected-delete-close></div>
+    <section class="protected-delete-dialog" role="dialog" aria-modal="true" aria-labelledby="protected-delete-title" aria-describedby="protected-delete-desc">
+      <header class="protected-delete-dialog__head">
+        <div>
+          <span class="protected-delete-dialog__kicker">COLLECTION / PROTECTION</span>
+          <h2 id="protected-delete-title">已拦截收藏内容的删除</h2>
+        </div>
+        <button type="button" id="protected-delete-close" class="icon-button" aria-label="取消本次删除"><svg><use href="#i-close"/></svg></button>
+      </header>
+      <p id="protected-delete-desc" class="protected-delete-dialog__desc">这里只列出已收藏的选中项。请逐项决定是否删除；未收藏内容不会显示，也不会在此时执行删除。</p>
+      <ul id="protected-delete-items" class="protected-delete-items"></ul>
+      <p id="protected-delete-summary" class="protected-delete-summary" aria-live="polite"></p>
+      <footer class="protected-delete-dialog__actions">
+        <button type="button" id="protected-delete-cancel" class="protected-delete-action">取消本次删除</button>
+        <button type="button" id="protected-delete-confirm" class="protected-delete-action protected-delete-action--danger">最终确认删除</button>
+      </footer>
+    </section>
+  </div>
+
   <!-- 基金详情抽屉 -->
   <div class="drawer-backdrop" id="fund-drawer-backdrop" hidden></div>
   <aside class="detail-drawer" id="fund-drawer" aria-hidden="true" aria-label="基金项目详情">
@@ -203,7 +267,9 @@
         <div class="article-meta" id="fund-drawer-meta"></div>
         <p class="article-summary" id="fund-drawer-abstract"></p>
         <div class="fund-papers">
-          <div class="fund-papers__head">成果论文 <b id="fund-paper-count">0</b> 篇</div>
+          <div class="fund-papers__head">成果论文 <b id="fund-paper-count">0</b> 篇
+            <button class="btn-secondary btn--translate" id="fund-translate-btn" type="button" title="翻译所有论文标题为中文">翻译标题</button>
+          </div>
           <ul id="fund-paper-list"></ul>
         </div>
         <a class="article-open" id="fund-drawer-portal" href="https://kd.nsfc.cn/" target="_blank" rel="noopener">
@@ -213,6 +279,14 @@
     </div>
   </aside>
 
-  <script src="/paper_observatory.js" defer></script>
+  <!-- 批量操作工具条（选中后出现） -->
+  <div id="bulk-delete-bar" class="bulk-delete-bar" hidden>
+    <span id="bulk-delete-count" class="bdb-count"></span>
+    <button type="button" id="bulk-delete-btn" class="bdb-btn bdb-danger">删除选中</button>
+    <button type="button" id="bulk-continuous-selection" class="bdb-btn bdb-toggle" aria-pressed="false" title="开启后，直接点击卡片即可连续累加选择">连续删除</button>
+    <button type="button" id="bulk-clear-sel" class="bdb-btn">取消选择</button>
+  </div>
+
+  <script src="/paper_observatory.js?v=20260815-collection-guard-2" defer></script>
 </body>
 </html>

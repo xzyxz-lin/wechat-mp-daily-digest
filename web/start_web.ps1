@@ -12,6 +12,7 @@ $ErrorActionPreference = 'Continue'
 # so PowerShell 5.1 reads this script correctly regardless of encoding).
 $projectRoot   = (Resolve-Path -LiteralPath (Join-Path -Path $PSScriptRoot -ChildPath '..')).Path
 $composeFile   = Join-Path -Path $projectRoot -ChildPath 'wewe-rss\docker-compose.sqlite.yml'
+$composeProject = 'paper-observatory-wewe'
 $serverScript  = Join-Path -Path $PSScriptRoot -ChildPath 'paper_observatory.py'
 $venvPython    = Join-Path -Path $projectRoot -ChildPath 'scripts\.venv\Scripts\python.exe'
 $dockerDesktop = Join-Path -Path $env:LOCALAPPDATA -ChildPath 'Programs\DockerDesktop\Docker Desktop.exe'
@@ -55,23 +56,27 @@ if (-not $dockerVer) {
 }
 
 # ---- Step 2: WeWe RSS container ----
-$weweName = & docker ps --filter 'name=wewe-rss-app' --format '{{.Names}}' 2>$null
-if (-not $weweName) {
-    if (-not (Test-Path -LiteralPath $composeFile)) {
-        Write-Host "compose file missing: $composeFile"
-        exit 1
-    }
-    Write-Host 'Starting WeWe RSS container...'
-    & docker compose -f $composeFile up -d | Out-Null
-    $ok = $false
-    for ($i = 0; $i -lt 60; $i++) {
-        if (Test-WeWeReady) { $ok = $true; break }
-        Start-Sleep -Seconds 2
-    }
-    if (-not $ok) {
-        Write-Host 'WeWe RSS start timeout.'
-        exit 1
-    }
+# Always address this workspace's explicit Compose project.  Do not reuse a
+# generic wewe-rss-app container, because another checkout can have the same
+# default Compose name while mounting a different database directory.
+if (-not (Test-Path -LiteralPath $composeFile)) {
+    Write-Host "compose file missing: $composeFile"
+    exit 1
+}
+Write-Host 'Starting Paper Observatory WeWe RSS container...'
+& docker compose --project-name $composeProject -f $composeFile up -d | Out-Null
+if ($LASTEXITCODE -ne 0) {
+    Write-Host 'WeWe RSS container start failed.'
+    exit 1
+}
+$ok = $false
+for ($i = 0; $i -lt 60; $i++) {
+    if (Test-WeWeReady) { $ok = $true; break }
+    Start-Sleep -Seconds 2
+}
+if (-not $ok) {
+    Write-Host 'WeWe RSS start timeout.'
+    exit 1
 }
 
 # ---- Step 3: Web backend (重启以确保使用最新代码) ----
@@ -80,9 +85,9 @@ if (-not (Test-Path -LiteralPath $venvPython)) {
     exit 1
 }
 # 若端口已被旧进程占用，先释放，避免用到旧代码（8032 专用于观察台）
-$occupied = Get-NetTCPConnection -LocalPort $Port -ErrorAction SilentlyContinue
+$occupied = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
 if ($occupied) {
-    $oldPid = $occupied.OwningProcess | Select-Object -First 1
+    $oldPid = [int]($occupied | Select-Object -First 1 -ExpandProperty OwningProcess)
     try { Stop-Process -Id $oldPid -Force -ErrorAction SilentlyContinue } catch {}
     Start-Sleep -Seconds 1
 }

@@ -12,9 +12,9 @@ import argparse
 import os
 
 SCRIPT_NAME = "daily-push-startup.vbs"
-PYTHON_EXE = r"A:\workbuddy项目\推送公众号论文\scripts\.venv\Scripts\python.exe"
-DAILY_PY = r"A:\workbuddy项目\推送公众号论文\scripts\daily.py"
-SCRIPTS_DIR = r"A:\workbuddy项目\推送公众号论文\scripts"
+PYTHON_EXE = r"A:\workbuddy项目\论文观察台\scripts\.venv\Scripts\python.exe"
+DAILY_PY = r"A:\workbuddy项目\论文观察台\scripts\daily.py"
+SCRIPTS_DIR = r"A:\workbuddy项目\论文观察台\scripts"
 
 
 def get_startup_dir():

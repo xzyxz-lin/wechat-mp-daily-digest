@@ -54,7 +54,7 @@ foreach ($t in $tasks) {
 }
 
 $log += "=== Optimization script finished ==="
-$log -join "`r`n" | Out-File -Encoding UTF8 'A:\workbuddy项目\推送公众号论文\.workbuddy\opt_result.txt'
+$log -join "`r`n" | Out-File -Encoding UTF8 'A:\workbuddy项目\论文观察台\.workbuddy\opt_result.txt'
 Write-Output ($log -join "`r`n")
 Write-Output ""
 Write-Output "DONE - check opt_result.txt for details"
