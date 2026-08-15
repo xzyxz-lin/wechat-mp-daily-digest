@@ -84,13 +84,20 @@ if (-not (Test-Path -LiteralPath $venvPython)) {
     Write-Host "python venv missing: $venvPython"
     exit 1
 }
-# 若端口已被旧进程占用，先释放，避免用到旧代码（8032 专用于观察台）
-$occupied = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
-if ($occupied) {
-    $oldPid = [int]($occupied | Select-Object -First 1 -ExpandProperty OwningProcess)
-    try { Stop-Process -Id $oldPid -Force -ErrorAction SilentlyContinue } catch {}
-    Start-Sleep -Seconds 1
+# 若端口已被旧进程占用，先释放，避免用到旧代码（8032 专用于观察台）。
+# Windows 下某些 Python 启动方式会留下父/子进程；只杀监听子进程会被父进程继续托管。
+# 因此只匹配命令行明确属于本项目、且端口相同的 Python 进程，再一并停止。
+$serverPattern = [regex]::Escape($serverScript)
+$portPattern = "--port\s+$Port(\s|$)"
+$oldServerProcesses = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
+    $_.Name -match '^pythonw?\.exe$' -and
+    $_.CommandLine -match $serverPattern -and
+    $_.CommandLine -match $portPattern
 }
+foreach ($oldServerProcess in $oldServerProcesses) {
+    try { Stop-Process -Id $oldServerProcess.ProcessId -Force -ErrorAction Stop } catch {}
+}
+if ($oldServerProcesses) { Start-Sleep -Seconds 1 }
 if (-not (Test-PaperObservatoryReady -Url $siteUrl)) {
     Write-Host 'Starting Paper Observatory backend...'
     Start-Process -FilePath $venvPython -ArgumentList @($serverScript, '--host', '0.0.0.0', '--port', [string]$Port) -WindowStyle Hidden | Out-Null
