@@ -17,6 +17,7 @@
     fundKw: "",
     fundQ: "",
     favCat: "公众号",          // 私人珍藏当前标签
+    trashCategory: "",         // 回收站分类：全部 | 公众号 | 期刊 | 基金项目
     // 多选 / 批量删除
     selArticles: new Set(),   // 已选文章 id
     selFunds: new Set(),      // 已选基金 id
@@ -99,7 +100,7 @@
   }
 
   function catClass(cat) {
-    return cat === "期刊" ? "is-journal" : (cat === "基金" ? "is-fund" : "is-mp");
+    return cat === "期刊" ? "is-journal" : ((cat === "基金" || cat === "基金项目") ? "is-fund" : "is-mp");
   }
 
   // ===== 健康检查 =====
@@ -133,6 +134,8 @@
       } catch (e) { /* 无基金数据时不报错 */ }
       // 更新收藏计数
       try { updateFavCounts(); const fav = loadFavorites(); const navFavTotal = document.getElementById("nav-fav-total"); if (navFavTotal) navFavTotal.textContent = fav.mp.length + fav.journal.length + fav.fund.length; } catch(e){}
+      // 更新回收站导航计数；失败时不影响主页面加载。
+      try { await loadTrashSummary(); } catch (e) {}
       // 加载每日快照
       loadSnapshot();
     } catch (e) {
@@ -169,6 +172,9 @@
       ${group("期刊", "期刊", jour)}
       <button class="nav-item" data-view="fund" type="button">
         <svg><use href="#i-fund"/></svg><span>基金</span><b id="nav-fund-count"></b>
+      </button>
+      <button class="nav-item" data-view="trash" type="button">
+        <svg><use href="#i-trash"/></svg><span>回收站</span><b id="nav-trash-count">0</b>
       </button>`;
 
     navStack.querySelectorAll(".nav-group__header").forEach((h) => {
@@ -1288,11 +1294,27 @@
     const fundIds = [...state.selFunds];
     const articleRecords = articleIds.map(id => {
       const item = (state.selectedItems.article.get(id) || {}).item || {};
-      return { id, title: item.title, category: item.category, account: item.account, archive_date: item.date };
+      return {
+        id,
+        title: item.title,
+        title_zh: item.title_zh,
+        summary: item.summary,
+        category: item.category,
+        account: item.account,
+        archive_date: item.date,
+        url: item.url || item.link,
+      };
     });
     const fundRecords = fundIds.map(id => {
       const item = (state.selectedItems.fund.get(id) || {}).item || {};
-      return { id, project_name: item.project_name };
+      return {
+        id,
+        project_name: item.project_name,
+        principal: item.principal,
+        institution: item.institution,
+        ratify_no: item.ratify_no,
+        hit_keywords: item.hit_keywords,
+      };
     });
     let okCount = 0;
     try {
@@ -1426,11 +1448,13 @@
       dashboard: ["PAPER MAP / 00", "论文观察台"],
       fund: ["FUND / NSFC", "国自然基金观察"],
       favorites: ["FAVORITES / COLLECTION", "私人珍藏"],
+      trash: ["RECYCLE BIN / 7 DAYS", "回收站"],
     }[view] || ["", ""];
     pageEyebrow.textContent = meta[0];
     pageTitle.textContent = meta[1];
     if (view === "fund") { loadFunds(state.fundKw, state.fundQ); }
     if (view === "favorites") { showFavorites(state.favCat); }
+    if (view === "trash") { loadTrash(state.trashCategory); }
   };
 
   // 初始化滑动标记（在文章渲染后调用）
@@ -1521,6 +1545,230 @@
     });
   }
 
+  // ===== 回收站 =====
+  const trashTabs = $("#trash-tabs");
+  const trashList = $("#trash-list");
+  const trashClearButton = $("#trash-clear-button");
+  const trashSelectionBar = $("#trash-selection-bar");
+  const trashSelectionCount = $("#trash-selection-count");
+  let trashItems = [];
+  let selectedTrashItems = new Set();
+  let lastTrashAnchor = null;
+
+  function trashSelectionKey(item) {
+    return `${item.kind}:${item.id}`;
+  }
+
+  function clearTrashSelection() {
+    selectedTrashItems.clear();
+    lastTrashAnchor = null;
+    updateTrashSelectionUI();
+  }
+
+  function updateTrashSelectionUI() {
+    document.querySelectorAll(".trash-row[data-trash-key]").forEach(row => {
+      row.classList.toggle("is-selected", selectedTrashItems.has(row.dataset.trashKey));
+    });
+    if (trashSelectionBar) trashSelectionBar.hidden = selectedTrashItems.size === 0;
+    if (trashSelectionCount) trashSelectionCount.textContent = `已选中 ${selectedTrashItems.size} 项`;
+  }
+
+  function updateTrashCounts(data) {
+    const values = {
+      "nav-trash-count": data.total || 0,
+      "trash-total-count": data.total || 0,
+      "trash-mp-count": data.mp_count || 0,
+      "trash-journal-count": data.journal_count || 0,
+      "trash-fund-count": data.fund_count || 0,
+    };
+    Object.entries(values).forEach(([id, value]) => {
+      const el = document.getElementById(id);
+      if (el) el.textContent = value;
+    });
+  }
+
+  async function loadTrashSummary() {
+    const data = await fetchJSON("/api/trash");
+    updateTrashCounts(data);
+    return data;
+  }
+
+  function trashDateTime(value) {
+    if (!value) return "时间未知";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return value;
+    return date.toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
+  }
+
+  function renderTrash(data) {
+    trashItems = data.items || [];
+    updateTrashCounts(data);
+    if (trashTabs) {
+      trashTabs.querySelectorAll(".trash-tab").forEach(tab => {
+        tab.classList.toggle("is-active", tab.dataset.trashCategory === state.trashCategory);
+      });
+    }
+    const items = state.trashCategory
+      ? trashItems.filter(item => item.category === state.trashCategory)
+      : trashItems;
+    const validKeys = new Set(trashItems.map(trashSelectionKey));
+    selectedTrashItems.forEach(key => { if (!validKeys.has(key)) selectedTrashItems.delete(key); });
+    if (!trashList) return;
+    if (!items.length) {
+      const tip = state.trashCategory ? `暂无${state.trashCategory}删除内容。` : "回收站目前为空。";
+      trashList.innerHTML = `<div class="trash-empty">${tip}<br><small>删除内容在这里保留 7 天，期间可以恢复。</small></div>`;
+      updateTrashSelectionUI();
+      return;
+    }
+    trashList.innerHTML = items.map(item => {
+      const source = item.kind === "fund"
+        ? [item.payload && item.payload.principal, item.payload && item.payload.institution].filter(Boolean).join(" · ")
+        : item.account;
+      const period = `删除于 ${trashDateTime(item.deleted_at)} · 可恢复至 ${trashDateTime(item.expires_at)}`;
+      return `
+        <article class="trash-row ${selectedTrashItems.has(trashSelectionKey(item)) ? "is-selected" : ""}" data-trash-key="${escapeHtml(trashSelectionKey(item))}">
+          <div class="trash-row__main">
+            <div class="trash-row__meta">
+              <span class="cat-badge ${catClass(item.category)}">${escapeHtml(item.category || "未分类")}</span>
+              <span>${escapeHtml(period)}</span>
+            </div>
+            <div class="trash-row__title" title="${escapeHtml(item.title)}">${escapeHtml(item.title)}</div>
+            ${source ? `<div class="trash-row__source">${escapeHtml(source)}</div>` : ""}
+          </div>
+          <button class="trash-row__restore" type="button" data-trash-restore-kind="${escapeHtml(item.kind)}" data-trash-restore-id="${escapeHtml(item.id)}">恢复</button>
+        </article>`;
+    }).join("");
+    updateTrashSelectionUI();
+  }
+
+  async function loadTrash(category) {
+    const nextCategory = category || "";
+    if (nextCategory !== state.trashCategory) clearTrashSelection();
+    state.trashCategory = nextCategory;
+    if (trashList) trashList.innerHTML = `<p class="snapshot-loading">正在读取回收站…</p>`;
+    try {
+      const data = await loadTrashSummary();
+      renderTrash(data);
+    } catch (e) {
+      if (trashList) trashList.innerHTML = `<div class="trash-empty">回收站加载失败：${escapeHtml(e.message)}</div>`;
+      showToast("回收站加载失败：" + e.message, true);
+    }
+  }
+
+  async function restoreTrashItem(kind, id) {
+    try {
+      const result = await fetchJSON("/api/trash/restore", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ items: [{ kind, id }] }),
+      });
+      if (!result.restored) throw new Error("该内容已不在可恢复期限内");
+      showToast(`已恢复 ${result.restored} 项`);
+      clearTrashSelection();
+      await loadTrash(state.trashCategory);
+      await loadOverview();
+    } catch (e) {
+      showToast("恢复失败：" + e.message, true);
+    }
+  }
+
+  if (trashTabs) {
+    trashTabs.addEventListener("click", (event) => {
+      const tab = event.target.closest("[data-trash-category]");
+      if (tab) loadTrash(tab.dataset.trashCategory);
+    });
+  }
+  if (trashList) {
+    trashList.addEventListener("click", (event) => {
+      const button = event.target.closest("[data-trash-restore-id]");
+      if (button) {
+        restoreTrashItem(button.dataset.trashRestoreKind, button.dataset.trashRestoreId);
+        return;
+      }
+      const row = event.target.closest(".trash-row[data-trash-key]");
+      if (!row || window.getSelection()?.toString()) return;
+      const visibleItems = state.trashCategory
+        ? trashItems.filter(item => item.category === state.trashCategory)
+        : trashItems;
+      const clickedIndex = visibleItems.findIndex(item => trashSelectionKey(item) === row.dataset.trashKey);
+      if (clickedIndex < 0) return;
+      const clickedKey = row.dataset.trashKey;
+      if (event.shiftKey && lastTrashAnchor != null) {
+        const anchorIndex = visibleItems.findIndex(item => trashSelectionKey(item) === lastTrashAnchor);
+        if (anchorIndex >= 0) {
+          if (!event.ctrlKey && !event.metaKey) selectedTrashItems.clear();
+          const start = Math.min(anchorIndex, clickedIndex);
+          const end = Math.max(anchorIndex, clickedIndex);
+          for (let index = start; index <= end; index += 1) selectedTrashItems.add(trashSelectionKey(visibleItems[index]));
+        } else {
+          selectedTrashItems.add(clickedKey);
+        }
+      } else if (event.ctrlKey || event.metaKey) {
+        if (selectedTrashItems.has(clickedKey)) selectedTrashItems.delete(clickedKey);
+        else selectedTrashItems.add(clickedKey);
+        lastTrashAnchor = clickedKey;
+      } else {
+        selectedTrashItems.clear();
+        selectedTrashItems.add(clickedKey);
+        lastTrashAnchor = clickedKey;
+      }
+      updateTrashSelectionUI();
+    });
+  }
+  function selectedTrashPayload() {
+    return trashItems
+      .filter(item => selectedTrashItems.has(trashSelectionKey(item)))
+      .map(item => ({ kind: item.kind, id: item.id }));
+  }
+  const trashRestoreSelected = $("#trash-restore-selected");
+  const trashPurgeSelected = $("#trash-purge-selected");
+  const trashClearSelection = $("#trash-clear-selection");
+  if (trashRestoreSelected) {
+    trashRestoreSelected.addEventListener("click", async () => {
+      const items = selectedTrashPayload();
+      if (!items.length) return;
+      try {
+        const result = await fetchJSON("/api/trash/restore", {
+          method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ items }),
+        });
+        showToast(`已恢复 ${result.restored || 0} 项`);
+        clearTrashSelection();
+        await loadTrash(state.trashCategory);
+        await loadOverview();
+      } catch (e) { showToast("批量恢复失败：" + e.message, true); }
+    });
+  }
+  if (trashPurgeSelected) {
+    trashPurgeSelected.addEventListener("click", async () => {
+      const items = selectedTrashPayload();
+      if (!items.length) return;
+      if (!window.confirm(`确定永久移出选中的 ${items.length} 项吗？之后将无法从回收站恢复。`)) return;
+      try {
+        const result = await fetchJSON("/api/trash/purge", {
+          method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ items }),
+        });
+        showToast(`已永久移出 ${result.purged || 0} 项`);
+        clearTrashSelection();
+        await loadTrash(state.trashCategory);
+        await loadOverview();
+      } catch (e) { showToast("永久移出失败：" + e.message, true); }
+    });
+  }
+  if (trashClearSelection) trashClearSelection.addEventListener("click", clearTrashSelection);
+  if (trashClearButton) {
+    trashClearButton.addEventListener("click", async () => {
+      if (!window.confirm("确定清空回收站吗？清空后，这些内容将不再提供恢复入口。")) return;
+      try {
+        const result = await fetchJSON("/api/trash/clear", { method: "POST" });
+        showToast(`已清空 ${result.cleared || 0} 条回收站记录`);
+        await loadTrash(state.trashCategory);
+        await loadOverview();
+      } catch (e) {
+        showToast("清空回收站失败：" + e.message, true);
+      }
+    });
+  }
+
   // ===== 每日快照 =====
   const snapBody = $("#snapshot-body");
   const snapDateSelect = $("#snapshot-date-select");
@@ -1578,11 +1826,15 @@
           + (s.fund_keywords.length > 10 ? `<span class="snap-tag snap-tag--fund">+${s.fund_keywords.length - 10}</span>` : "")
       : `<span class="snap-tag snap-tag--none">0</span>`;
 
+    const totalFetched = Number(s.total_fetched) || (
+      (Number(s.mp_count) || 0) + (Number(s.journal_count) || 0) + (Number(s.fund_count) || 0)
+    );
     snapBody.innerHTML = `
       <div class="snap-grid">
         <div class="snap-card">
-          <div class="snap-card__label">论文总数</div>
-          <div class="snap-card__value snap-card__value--accent">${s.total_articles || 0}</div>
+          <div class="snap-card__label">拉取总数</div>
+          <div class="snap-card__value snap-card__value--accent">${totalFetched}</div>
+          <div class="snap-card__sub">公众号、期刊、基金项目合计</div>
         </div>
         <div class="snap-card">
           <div class="snap-card__label">公众号</div>
@@ -1631,23 +1883,15 @@
       renderDeletionAuditError(e);
     }
   }
-  function renderDeletionAudit(audit, snapshot) {
-    const fetchedArticles = Number(snapshot && snapshot.total_articles) || 0;
-    const sameArchiveDeleted = Number(audit.same_archive_article_count) || 0;
-    const remainingArticles = Math.max(0, fetchedArticles - sameArchiveDeleted);
-    deletionAuditDate.textContent = `${formatDateLabel(audit.date)} · 与上方拉取快照对账`;
-    const recent = audit.recent || [];
-    const recentHtml = recent.length
-      ? `<div class="deletion-audit-recent"><span>最近删除</span>${recent.map(item => `<span class="deletion-audit-recent__item">${escapeHtml(item.category || "内容")} · ${escapeHtml(item.title || "未命名项目")}</span>`).join("")}</div>`
-      : `<p class="deletion-audit-empty">本日尚无删除记录。最终确认删除后会自动登记在这里。</p>`;
+  function renderDeletionAudit(audit) {
+    deletionAuditDate.textContent = `${formatDateLabel(audit.date)} · 最终确认的删除记录`;
     deletionAuditBody.innerHTML = `
       <div class="deletion-audit-grid">
-        <div class="deletion-audit-card"><span>当日拉取论文</span><strong>${fetchedArticles}</strong><small>来自上方快照</small></div>
-        <div class="deletion-audit-card deletion-audit-card--danger"><span>当日归档删除</span><strong>${sameArchiveDeleted}</strong><small>同一归档日的文章</small></div>
-        <div class="deletion-audit-card deletion-audit-card--result"><span>对账后论文保留</span><strong>${remainingArticles}</strong><small>拉取减同日删除</small></div>
-        <div class="deletion-audit-card"><span>今日删除操作</span><strong>${audit.total || 0}</strong><small>文章 ${audit.article_count || 0} · 基金 ${audit.fund_count || 0}</small></div>
-      </div>
-      ${recentHtml}`;
+        <div class="deletion-audit-card deletion-audit-card--danger"><span>删除总数</span><strong>${audit.total || 0}</strong><small>三类内容最终删除合计</small></div>
+        <div class="deletion-audit-card"><span>公众号</span><strong>${audit.mp_count || 0}</strong><small>公众号文章</small></div>
+        <div class="deletion-audit-card"><span>期刊</span><strong>${audit.journal_count || 0}</strong><small>期刊论文</small></div>
+        <div class="deletion-audit-card"><span>基金项目</span><strong>${audit.fund_count || 0}</strong><small>基金项目</small></div>
+      </div>`;
   }
   function renderDeletionAuditEmpty() {
     deletionAuditDate.textContent = "暂无可对账日期";

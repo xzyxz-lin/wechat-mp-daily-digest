@@ -27,7 +27,7 @@ import subprocess
 import threading
 import urllib.request
 import ssl
-from datetime import datetime
+from datetime import datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs
@@ -43,6 +43,7 @@ FUNDS_PATH = PROJECT_DIR / "data" / "funds.json"
 DELETED_PATH = PROJECT_DIR / "data" / "deleted.json"
 SNAPSHOTS_PATH = PROJECT_DIR / "data" / "snapshots.json"
 DELETION_AUDIT_PATH = PROJECT_DIR / "data" / "deletion_audit.json"
+RECYCLE_BIN_PATH = PROJECT_DIR / "data" / "recycle_bin.json"
 
 _config: dict = {}
 ARCHIVE_DIR: Path = Path(".")
@@ -150,6 +151,223 @@ def save_deleted(d: dict) -> None:
         pass
 
 
+# ===== 回收站（删除索引的 7 天可恢复窗口，不会物理删除原始归档） =====
+def load_recycle_bin() -> dict:
+    if not RECYCLE_BIN_PATH.exists():
+        return {"items": []}
+    try:
+        with open(RECYCLE_BIN_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, dict):
+            return {"items": []}
+        data.setdefault("items", [])
+        data["items"] = [item for item in data["items"] if isinstance(item, dict)]
+        return data
+    except Exception:
+        return {"items": []}
+
+
+def save_recycle_bin(recycle_bin: dict) -> None:
+    try:
+        with open(RECYCLE_BIN_PATH, "w", encoding="utf-8") as f:
+            json.dump(recycle_bin, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+
+def _parse_iso(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def prune_recycle_bin(recycle_bin: dict | None = None) -> dict:
+    """移除已超过 7 天恢复窗口的回收站记录，原始归档和删除索引保持不变。"""
+    recycle_bin = recycle_bin or load_recycle_bin()
+    now = datetime.now().astimezone()
+    items = recycle_bin.get("items", [])
+    kept = []
+    for item in items:
+        expires_at = _parse_iso(item.get("expires_at"))
+        if expires_at is None or expires_at > now:
+            kept.append(item)
+    if len(kept) != len(items):
+        recycle_bin["items"] = kept
+        recycle_bin["updated_at"] = now.isoformat(timespec="seconds")
+        save_recycle_bin(recycle_bin)
+    return recycle_bin
+
+
+def record_recycle_items(kind: str, ids: list, records: list | None = None) -> None:
+    """为本次新删除的项目建立可恢复记录；同一 kind/id 只保留最新一条。"""
+    if not ids:
+        return
+    records_by_id = {
+        str(item.get("id")): item for item in (records or [])
+        if isinstance(item, dict) and item.get("id") is not None
+    }
+    recycle_bin = prune_recycle_bin()
+    existing = [
+        item for item in recycle_bin.get("items", [])
+        if (item.get("kind"), str(item.get("id"))) not in {(kind, str(item_id)) for item_id in ids}
+    ]
+    deleted_at = now_iso()
+    expires_at = (datetime.now().astimezone() + timedelta(days=7)).isoformat(timespec="seconds")
+    for item_id in ids:
+        source = records_by_id.get(str(item_id), {})
+        is_fund = kind == "fund"
+        category = "基金项目" if is_fund else str(source.get("category") or "公众号")
+        title = (source.get("project_name") if is_fund else source.get("title")) or "未命名内容"
+        existing.append({
+            "id": str(item_id),
+            "kind": kind,
+            "category": category,
+            "title": str(title),
+            "account": str(source.get("account") or ""),
+            "archive_date": str(source.get("archive_date") or ""),
+            "deleted_at": deleted_at,
+            "expires_at": expires_at,
+            "payload": source,
+        })
+    recycle_bin["items"] = existing
+    recycle_bin["updated_at"] = deleted_at
+    save_recycle_bin(recycle_bin)
+
+
+def backfill_recycle_bin_from_audit() -> dict:
+    """首次启用回收站时，将尚在 7 天窗口且仍被标记删除的历史记录补入。"""
+    recycle_bin = load_recycle_bin()
+    if recycle_bin.get("audit_backfill_complete"):
+        return recycle_bin
+    deleted = load_deleted()
+    active = {
+        ("article", str(item_id)) for item_id in deleted.get("articles", [])
+    } | {
+        ("fund", str(item_id)) for item_id in deleted.get("funds", [])
+    }
+    existing = {
+        (str(item.get("kind")), str(item.get("id")))
+        for item in recycle_bin.get("items", [])
+    }
+    now = datetime.now().astimezone()
+    added = 0
+    for day in load_deletion_audit().values():
+        for event in (day.get("events", []) if isinstance(day, dict) else []):
+            if not isinstance(event, dict):
+                continue
+            kind = str(event.get("kind") or "")
+            item_id = str(event.get("id") or "")
+            key = (kind, item_id)
+            if key not in active or key in existing or kind not in {"article", "fund"}:
+                continue
+            deleted_at = str(event.get("deleted_at") or now_iso())
+            deleted_time = _parse_iso(deleted_at) or now
+            expires_at = deleted_time + timedelta(days=7)
+            if expires_at <= now:
+                continue
+            is_fund = kind == "fund"
+            recycle_bin.setdefault("items", []).append({
+                "id": item_id,
+                "kind": kind,
+                "category": "基金项目" if is_fund else str(event.get("category") or "公众号"),
+                "title": str(event.get("title") or "未命名内容"),
+                "account": str(event.get("account") or ""),
+                "archive_date": str(event.get("archive_date") or ""),
+                "deleted_at": deleted_at,
+                "expires_at": expires_at.isoformat(timespec="seconds"),
+                "payload": event,
+            })
+            existing.add(key)
+            added += 1
+    recycle_bin["audit_backfill_complete"] = True
+    recycle_bin["updated_at"] = now_iso()
+    save_recycle_bin(recycle_bin)
+    return recycle_bin
+
+
+def recycle_bin_summary() -> dict:
+    recycle_bin = prune_recycle_bin(backfill_recycle_bin_from_audit())
+    items = sorted(
+        recycle_bin.get("items", []),
+        key=lambda item: str(item.get("deleted_at") or ""),
+        reverse=True,
+    )
+    return {
+        "retention_days": 7,
+        "total": len(items),
+        "mp_count": sum(1 for item in items if item.get("kind") == "article" and item.get("category") == "公众号"),
+        "journal_count": sum(1 for item in items if item.get("kind") == "article" and item.get("category") == "期刊"),
+        "fund_count": sum(1 for item in items if item.get("kind") == "fund"),
+        "items": items,
+        "updated_at": recycle_bin.get("updated_at"),
+    }
+
+
+def restore_recycle_items(items_to_restore: list | None = None) -> int:
+    """从删除索引恢复指定回收站项目，并移除相应的回收站记录。"""
+    requested = {
+        (str(item.get("kind")), str(item.get("id")))
+        for item in (items_to_restore or [])
+        if isinstance(item, dict) and item.get("kind") and item.get("id") is not None
+    }
+    if not requested:
+        return 0
+    recycle_bin = prune_recycle_bin()
+    available = {
+        (str(item.get("kind")), str(item.get("id")))
+        for item in recycle_bin.get("items", [])
+    }
+    restoring = requested & available
+    if not restoring:
+        return 0
+    deleted = load_deleted()
+    article_ids = {item_id for kind, item_id in restoring if kind == "article"}
+    fund_ids = {item_id for kind, item_id in restoring if kind == "fund"}
+    deleted["articles"] = [item_id for item_id in deleted.get("articles", []) if str(item_id) not in article_ids]
+    deleted["funds"] = [item_id for item_id in deleted.get("funds", []) if str(item_id) not in fund_ids]
+    save_deleted(deleted)
+    recycle_bin["items"] = [
+        item for item in recycle_bin.get("items", [])
+        if (str(item.get("kind")), str(item.get("id"))) not in restoring
+    ]
+    recycle_bin["updated_at"] = now_iso()
+    save_recycle_bin(recycle_bin)
+    return len(restoring)
+
+
+def clear_recycle_bin() -> int:
+    """清空可恢复记录；已标记删除的项目仍保持隐藏，不会恢复。"""
+    recycle_bin = prune_recycle_bin()
+    count = len(recycle_bin.get("items", []))
+    save_recycle_bin({"items": [], "audit_backfill_complete": True, "updated_at": now_iso()})
+    return count
+
+
+def purge_recycle_items(items_to_purge: list | None = None) -> int:
+    """从回收站永久移除指定记录；删除索引保持不变，因此不会意外恢复内容。"""
+    requested = {
+        (str(item.get("kind")), str(item.get("id")))
+        for item in (items_to_purge or [])
+        if isinstance(item, dict) and item.get("kind") and item.get("id") is not None
+    }
+    if not requested:
+        return 0
+    recycle_bin = prune_recycle_bin()
+    before = recycle_bin.get("items", [])
+    recycle_bin["items"] = [
+        item for item in before
+        if (str(item.get("kind")), str(item.get("id"))) not in requested
+    ]
+    removed = len(before) - len(recycle_bin["items"])
+    if removed:
+        recycle_bin["updated_at"] = now_iso()
+        save_recycle_bin(recycle_bin)
+    return removed
+
+
 # ===== 删除对账（保留删除操作记录，不影响可恢复的删除索引）=====
 def load_deletion_audit() -> dict:
     if not DELETION_AUDIT_PATH.exists():
@@ -215,11 +433,15 @@ def deletion_audit_summary(target_date: str | None = None) -> dict:
     events = [event for event in events if isinstance(event, dict)]
     article_events = [event for event in events if event.get("kind") == "article"]
     fund_events = [event for event in events if event.get("kind") == "fund"]
+    mp_events = [event for event in article_events if event.get("category") == "公众号"]
+    journal_events = [event for event in article_events if event.get("category") == "期刊"]
     same_archive_day = [event for event in article_events if event.get("archive_date") == target_date]
     return {
         "date": target_date,
         "total": len(events),
         "article_count": len(article_events),
+        "mp_count": len(mp_events),
+        "journal_count": len(journal_events),
         "fund_count": len(fund_events),
         "same_archive_article_count": len(same_archive_day),
         "recent": list(reversed(events[-8:])),
@@ -319,11 +541,15 @@ def generate_snapshot(target_date: str | None = None) -> dict:
             funds = fdata.get("funds", [])
             # 只在「今天」的快照里计入基金（避免历史快照重复计数）
             if target_date == _today_str() and funds:
+                snap["fetched"] = True
                 snap["fund_count"] = len(funds)
                 kw_set = {k for x in funds for k in (x.get("hit_keywords") or [])}
                 snap["fund_keywords"] = sorted(kw_set)
         except Exception:
             pass
+
+    # 拉取总数必须覆盖公众号、期刊和基金项目三类内容。
+    snap["total_fetched"] = snap["mp_count"] + snap["journal_count"] + snap["fund_count"]
 
     # 持久化
     snapshots = load_snapshots()
@@ -951,6 +1177,8 @@ class Handler(BaseHTTPRequestHandler):
             elif path == "/api/deletion-audit":
                 audit_date = (qs.get("date") or [None])[0]
                 json_response(self, deletion_audit_summary(audit_date))
+            elif path == "/api/trash":
+                json_response(self, recycle_bin_summary())
             elif path.startswith("/api/snapshots/"):
                 # 获取某日快照详情
                 snap_date = path[len("/api/snapshots/"):]
@@ -1026,6 +1254,7 @@ class Handler(BaseHTTPRequestHandler):
             d["articles"] = list(existing)
             save_deleted(d)
             record_deletions("article", added_ids, body.get("records", []))
+            record_recycle_items("article", added_ids, body.get("records", []))
             json_response(self, {"ok": True, "deleted": added, "message": f"已删除 {added} 篇文章"})
         elif path == "/api/funds/delete":
             # 标记删除基金（按 id 加入索引）
@@ -1043,7 +1272,19 @@ class Handler(BaseHTTPRequestHandler):
             d["funds"] = list(existing)
             save_deleted(d)
             record_deletions("fund", added_ids, body.get("records", []))
+            record_recycle_items("fund", added_ids, body.get("records", []))
             json_response(self, {"ok": True, "deleted": added, "message": f"已删除 {added} 个基金"})
+        elif path == "/api/trash/restore":
+            body = _read_json_body(self)
+            restored = restore_recycle_items(body.get("items", []))
+            json_response(self, {"ok": True, "restored": restored, "message": f"已恢复 {restored} 项"})
+        elif path == "/api/trash/clear":
+            cleared = clear_recycle_bin()
+            json_response(self, {"ok": True, "cleared": cleared, "message": f"已清空 {cleared} 条回收站记录"})
+        elif path == "/api/trash/purge":
+            body = _read_json_body(self)
+            purged = purge_recycle_items(body.get("items", []))
+            json_response(self, {"ok": True, "purged": purged, "message": f"已永久移出 {purged} 条回收站记录"})
         elif path == "/api/deleted/clear":
             # 恢复全部已删除项（清空索引）
             save_deleted({"articles": [], "funds": []})

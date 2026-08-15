@@ -446,6 +446,33 @@ svg { width: 1.25rem; height: 1.25rem; fill: none; stroke: currentColor; stroke-
 
 /* 导航中私人珍藏的星标颜色 */
 .nav-item[data-view="favorites"] svg { color: var(--copper-500); }
+.nav-item[data-view="trash"] svg { color: var(--danger-600); }
+
+/* 回收站：与归档列表相同的分类阅读方式，危险操作单独强调。 */
+.trash-intro { align-items: center; }
+.trash-clear-button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 38px; padding: 0 14px; color: var(--danger-700); background: var(--white); border: 1px solid rgba(181,57,50,.45); border-radius: 3px; font-size: .8rem; font-weight: 700; cursor: pointer; transition: background .16s ease, color .16s ease; }
+.trash-clear-button:hover { color: var(--white); background: var(--danger-600); }
+.trash-clear-button svg { width: 15px; height: 15px; }
+.trash-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 18px; }
+.trash-tab { min-height: 36px; padding: 0 13px; color: var(--ink-700); background: var(--white); border: 1px solid var(--paper-300); border-radius: 999px; font-size: .78rem; font-weight: 650; cursor: pointer; }
+.trash-tab b { margin-left: 4px; color: var(--danger-600); font-size: .72rem; }
+.trash-tab:hover, .trash-tab.is-active { color: var(--danger-700); border-color: rgba(181,57,50,.55); background: #fff5f3; }
+.trash-selection-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 9px; margin: -6px 0 14px; padding: 10px 12px; color: var(--white); background: var(--ink-900); border-radius: 3px; font-size: .78rem; }
+.trash-selection-bar[hidden] { display: none; }
+.trash-selection-bar > span { margin-right: auto; font-weight: 700; }
+.trash-selection-bar button { min-height: 30px; padding: 0 10px; color: var(--paper-100); background: transparent; border: 1px solid rgba(255,255,255,.35); border-radius: 3px; font-size: .75rem; font-weight: 700; cursor: pointer; }
+.trash-selection-bar button:hover { background: rgba(255,255,255,.13); }
+.trash-selection-bar button.is-danger { color: #fff; background: var(--danger-600); border-color: var(--danger-600); }
+.trash-list { display: grid; gap: 10px; min-height: 140px; }
+.trash-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 18px; padding: 17px 18px; background: var(--white); border: 1px solid var(--paper-300); border-left: 3px solid var(--danger-600); border-radius: 3px; }
+.trash-row.is-selected { background: #fff8f6; border-color: var(--danger-600); box-shadow: 0 0 0 2px rgba(181,57,50,.14); }
+.trash-row__main { min-width: 0; }
+.trash-row__meta { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; margin-bottom: 8px; color: var(--ink-500); font-size: .73rem; }
+.trash-row__title { overflow: hidden; color: var(--ink-900); font-family: var(--font-display); font-size: .98rem; font-weight: 650; line-height: 1.45; text-overflow: ellipsis; white-space: nowrap; }
+.trash-row__source { margin-top: 5px; color: var(--ink-600); font-size: .76rem; }
+.trash-row__restore { min-width: 82px; min-height: 34px; padding: 0 12px; color: var(--oxide-700); background: var(--paper-50); border: 1px solid rgba(31,91,87,.4); border-radius: 3px; font-size: .77rem; font-weight: 700; cursor: pointer; }
+.trash-row__restore:hover { color: var(--white); background: var(--oxide-600); }
+.trash-empty { display: grid; min-height: 190px; place-items: center; padding: 25px; color: var(--ink-500); background: var(--paper-50); border: 1px dashed var(--paper-300); border-radius: 3px; font-size: .86rem; text-align: center; }
 
 /* ===== 每日快照面板 ===== */
 .snapshot-panel {
@@ -504,7 +531,7 @@ svg { width: 1.25rem; height: 1.25rem; fill: none; stroke: currentColor; stroke-
 .snapshot-panel__body { min-height: 60px; }
 .snapshot-loading { text-align: center; color: var(--ink-500); font-size: .85rem; padding: 20px 0; }
 
-/* 每日删除对账：与拉取快照保持同一信息密度，突出最终确认后的删除记录。 */
+/* 每日删除统计：仅显示最终确认的分类删除计数。 */
 .deletion-audit-panel { margin: -8px 0 28px; padding: 18px 24px; background: var(--paper-50); border: 1px solid var(--paper-300); border-left: 4px solid var(--danger-600); border-radius: 3px; }
 .deletion-audit-panel__head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 14px; }
 .deletion-audit-panel__head h4 { margin: 2px 0 0; color: var(--ink-900); font-size: 1rem; }
@@ -515,11 +542,6 @@ svg { width: 1.25rem; height: 1.25rem; fill: none; stroke: currentColor; stroke-
 .deletion-audit-card strong { color: var(--ink-900); font: 700 1.55rem/1 var(--font-data); }
 .deletion-audit-card small { color: var(--ink-500); font-size: .7rem; }
 .deletion-audit-card--danger strong { color: var(--danger-600); }
-.deletion-audit-card--result { border-color: rgba(31,91,87,.35); }
-.deletion-audit-card--result strong { color: var(--oxide-700); }
-.deletion-audit-recent { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 14px; padding-top: 13px; border-top: 1px dashed var(--paper-300); color: var(--ink-600); font-size: .74rem; }
-.deletion-audit-recent > span:first-child { margin-right: 3px; font-weight: 700; }
-.deletion-audit-recent__item { max-width: 260px; overflow: hidden; padding: 3px 8px; color: var(--ink-700); background: var(--paper-100); border-radius: 999px; text-overflow: ellipsis; white-space: nowrap; }
 .deletion-audit-empty { margin: 0; padding: 10px 0 2px; color: var(--ink-500); font-size: .8rem; }
 
 /* 快照状态卡片 */
@@ -604,6 +626,9 @@ svg { width: 1.25rem; height: 1.25rem; fill: none; stroke: currentColor; stroke-
   .metric-strip { grid-template-columns: repeat(2, 1fr); }
   .metric-cell:nth-child(2) { border-right: 0; }
   .deletion-audit-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .trash-row { grid-template-columns: 1fr; gap: 12px; }
+  .trash-row__restore { width: 100%; }
+  .trash-selection-bar > span { width: 100%; }
 }
 
 @media (max-width: 600px) {
@@ -618,4 +643,8 @@ svg { width: 1.25rem; height: 1.25rem; fill: none; stroke: currentColor; stroke-
   .deletion-audit-panel__date { text-align: left; }
   .deletion-audit-grid { grid-template-columns: 1fr 1fr; }
   .deletion-audit-card { min-height: 88px; padding: 12px; }
+  .trash-intro { align-items: flex-start; }
+  .trash-clear-button { width: 100%; }
+  .trash-row__title { white-space: normal; }
+  .trash-selection-bar button { flex: 1; }
 }
