@@ -329,6 +329,7 @@ def restore_recycle_items(items_to_restore: list | None = None) -> int:
     deleted["articles"] = [item_id for item_id in deleted.get("articles", []) if str(item_id) not in article_ids]
     deleted["funds"] = [item_id for item_id in deleted.get("funds", []) if str(item_id) not in fund_ids]
     save_deleted(deleted)
+    mark_deletions_restored(restoring)
     recycle_bin["items"] = [
         item for item in recycle_bin.get("items", [])
         if (str(item.get("kind")), str(item.get("id"))) not in restoring
@@ -425,12 +426,51 @@ def record_deletions(kind: str, ids: list, records: list | None = None) -> None:
     save_deletion_audit(audit)
 
 
+def mark_deletions_restored(restored: set[tuple[str, str]]) -> None:
+    """为每项最近一次仍有效的删除事件写入恢复时间，保留审计历史。"""
+    if not restored:
+        return
+    audit = load_deletion_audit()
+    remaining = set(restored)
+    restored_at = now_iso()
+    changed = False
+    changed_dates: set[str] = set()
+    for date_key in sorted(audit.keys(), key=_date_key, reverse=True):
+        day = audit.get(date_key)
+        events = day.get("events", []) if isinstance(day, dict) else []
+        for event in reversed(events):
+            key = (str(event.get("kind")), str(event.get("id"))) if isinstance(event, dict) else None
+            if key not in remaining or event.get("restored_at"):
+                continue
+            event["restored_at"] = restored_at
+            remaining.remove(key)
+            changed = True
+            changed_dates.add(date_key)
+        if not remaining:
+            break
+    if changed:
+        for changed_date in changed_dates:
+            audit[changed_date]["updated_at"] = restored_at
+        save_deletion_audit(audit)
+
+
 def deletion_audit_summary(target_date: str | None = None) -> dict:
     """返回指定操作日的删除统计；日期为空时取今天。"""
     target_date = target_date or _today_str()
     day = load_deletion_audit().get(target_date, {})
     events = day.get("events", []) if isinstance(day, dict) else []
-    events = [event for event in events if isinstance(event, dict)]
+    active_deleted = {
+        ("article", str(item_id)) for item_id in load_deleted().get("articles", [])
+    } | {
+        ("fund", str(item_id)) for item_id in load_deleted().get("funds", [])
+    }
+    # 旧版本恢复过的记录可能没有 restored_at；以当前删除索引为最终准则，避免统计永久累加。
+    events = [
+        event for event in events
+        if isinstance(event, dict)
+        and not event.get("restored_at")
+        and (str(event.get("kind")), str(event.get("id"))) in active_deleted
+    ]
     article_events = [event for event in events if event.get("kind") == "article"]
     fund_events = [event for event in events if event.get("kind") == "fund"]
     mp_events = [event for event in article_events if event.get("category") == "公众号"]
