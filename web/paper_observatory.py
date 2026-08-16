@@ -23,8 +23,10 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import queue
 import subprocess
 import threading
+import time
 import urllib.request
 import ssl
 from datetime import datetime, timedelta
@@ -1021,23 +1023,60 @@ def start_fetch(start_date: str | None = None, end_date: str | None = None) -> N
             return
         FETCH_STATE.update(running=True, startedAt=now_iso(), finishedAt=None, output="", code=None)
 
-    cmd = [str(PYTHON_EXE), str(DAILY_PY), "--force"]
+    # -u 让子进程逐行输出；页面可实时显示当前抓取阶段，而非一直只显示“抓取中”。
+    cmd = [str(PYTHON_EXE), "-u", str(DAILY_PY), "--force"]
     if start_date and end_date:
         cmd += ["--start", start_date, "--end", end_date]
 
     def worker():
         global FETCH_STATE
+        proc = None
+        output_lines: list[str] = []
         try:
-            proc = subprocess.run(
+            proc = subprocess.Popen(
                 cmd,
-                capture_output=True, text=True, encoding="utf-8", timeout=600,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                bufsize=1,
                 cwd=str(SCRIPTS_DIR),
             )
+            line_queue: queue.Queue[str | None] = queue.Queue()
+
+            def read_output():
+                assert proc and proc.stdout
+                for line in proc.stdout:
+                    line_queue.put(line)
+                line_queue.put(None)
+
+            reader = threading.Thread(target=read_output, daemon=True)
+            reader.start()
+            deadline = time.monotonic() + 600
+            stream_open = True
+            while proc.poll() is None or stream_open:
+                remaining = deadline - time.monotonic()
+                if proc.poll() is None and remaining <= 0:
+                    proc.kill()
+                    raise subprocess.TimeoutExpired(cmd, 600)
+                try:
+                    line = line_queue.get(timeout=max(0.05, min(0.5, remaining)))
+                except queue.Empty:
+                    continue
+                if line is None:
+                    stream_open = False
+                    continue
+                output_lines.append(line)
+                with FETCH_LOCK:
+                    FETCH_STATE["output"] = "".join(output_lines)
+
+            reader.join(timeout=1)
             with FETCH_LOCK:
                 FETCH_STATE.update(
                     running=False,
                     finishedAt=now_iso(),
-                    output=(proc.stdout or "") + (proc.stderr or ""),
+                    output="".join(output_lines),
                     code=proc.returncode,
                 )
                 # 抓取完成后自动生成/更新当日快照

@@ -691,6 +691,10 @@
     state.fetchPolling = setInterval(async () => {
       try {
         const s = await fetchJSON("/api/fetch/status");
+        if (s.running) {
+          updateFetchProgress(s.output);
+          return;
+        }
         if (!s.running) {
           clearInterval(state.fetchPolling);
           resetFetchButton();
@@ -699,6 +703,8 @@
             snapshotTime.textContent = new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
             loadOverview();
             if (state.view === "account" && state.currentAccount) loadAccountArticles(state.currentAccount, 1);
+          } else if (s.code === 2 && (s.output || "").includes("[locked]")) {
+            showToast("已有另一项抓取在运行，本次没有重复执行", true);
           } else {
             showToast("抓取失败，详见后端日志", true);
           }
@@ -709,6 +715,25 @@
         showToast("状态查询失败：" + e.message, true);
       }
     }, 1500);
+  }
+
+  function updateFetchProgress(output) {
+    const lines = (output || "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+    const latest = lines.at(-1) || "";
+    let label = "抓取中…";
+    if (latest.startsWith("[journals] 正在抓取：")) {
+      label = "抓取中 · " + latest.slice("[journals] 正在抓取：".length);
+    } else if (latest.startsWith("[fetch] 调用")) {
+      label = "抓取中 · 公众号源";
+    } else if (latest.startsWith("[2/4]")) {
+      label = "抓取中 · 渲染中";
+    } else if (latest.startsWith("[3/4]")) {
+      label = "抓取中 · 保存中";
+    } else if (latest.startsWith("[4/4]")) {
+      label = "抓取中 · 发送中";
+    }
+    fetchButton.querySelector("span").textContent = label;
+    fetchButton.title = latest;
   }
 
   function resetFetchButton() {

@@ -12,6 +12,7 @@
 """
 import argparse
 import json
+import msvcrt
 import sys
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -19,10 +20,40 @@ from pathlib import Path
 SCRIPT_DIR = Path(__file__).parent
 sys.path.insert(0, str(SCRIPT_DIR))
 
+# 所有入口（网页、终端、第三方工具）共用这把 Windows 文件锁。
+# 锁由操作系统在进程异常退出时自动释放，避免遗留 pid 文件把之后的抓取永久卡住。
+FETCH_LOCK_PATH = SCRIPT_DIR.parent / "data" / "daily_fetch.lock"
+
 from fetch_articles import load_config, fetch_daily
 from fetch_journals import fetch_daily as fetch_journals_daily
 from render import render_html, render_markdown
 from send_email import send_email
+
+
+def acquire_fetch_lock():
+    """获取跨进程抓取锁；已有任务运行时返回 None。"""
+    FETCH_LOCK_PATH.parent.mkdir(parents=True, exist_ok=True)
+    handle = open(FETCH_LOCK_PATH, "a+b")
+    handle.seek(0, 2)
+    if handle.tell() == 0:
+        handle.write(b"0")
+        handle.flush()
+    handle.seek(0)
+    try:
+        msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+    except OSError:
+        handle.close()
+        return None
+    return handle
+
+
+def release_fetch_lock(handle) -> None:
+    """释放跨进程锁，但保留小型锁文件供下次复用。"""
+    try:
+        handle.seek(0)
+        msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+    finally:
+        handle.close()
 
 
 def parse_args():
@@ -170,27 +201,36 @@ def run_one_day(config, target_date, args):
 
 
 def main():
+    lock_handle = acquire_fetch_lock()
+    if lock_handle is None:
+        print("[locked] 已有另一项论文抓取正在运行，本次未重复执行。", file=sys.stderr)
+        return 2
+
     args = parse_args()
-    config = load_config(args.config)
-    dates = build_date_range(args)
+    try:
+        config = load_config(args.config)
+        dates = build_date_range(args)
 
-    print("=" * 50)
-    print("每日论文推送（公众号 + 期刊）")
-    print(f"待抓取日期: {[d.strftime('%Y-%m-%d') for d in dates]}")
-    if args.dry_run:
-        print("模式: DRY RUN")
-    print("=" * 50)
+        print("=" * 50)
+        print("每日论文推送（公众号 + 期刊）")
+        print(f"待抓取日期: {[d.strftime('%Y-%m-%d') for d in dates]}")
+        if args.dry_run:
+            print("模式: DRY RUN")
+        print("=" * 50)
 
-    total_articles = 0
-    for d in dates:
-        articles, skipped = run_one_day(config, d, args)
-        if not skipped and articles is not None:
-            total_articles += len(articles)
+        total_articles = 0
+        for d in dates:
+            articles, skipped = run_one_day(config, d, args)
+            if not skipped and articles is not None:
+                total_articles += len(articles)
 
-    print("\n" + "=" * 50)
-    print(f"完成，共处理 {len(dates)} 个日期，累计 {total_articles} 篇文章")
-    print("=" * 50)
+        print("\n" + "=" * 50)
+        print(f"完成，共处理 {len(dates)} 个日期，累计 {total_articles} 篇文章")
+        print("=" * 50)
+        return 0
+    finally:
+        release_fetch_lock(lock_handle)
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

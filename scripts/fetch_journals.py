@@ -473,6 +473,7 @@ def fetch_daily(config, target_date=None, lookback_days=7):
     print(f"\n[journals] 抓取期刊（窗口：{window_start} ~ {target_date}，北京时间），共 {len(journals)} 个源")
     result = []
     for j in journals:
+        print(f"[journals] 正在抓取：{j.get('name', '未知期刊')}")
         result.extend(fetch_one(j, target_date, proxy=proxy,
                                 seen_urls=seen, lookback_days=lookback_days))
         time.sleep(0.3)  # 礼貌性限速，避免被封
