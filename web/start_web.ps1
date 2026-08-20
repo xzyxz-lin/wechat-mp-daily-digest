@@ -21,17 +21,13 @@ $siteUrl = "http://127.0.0.1:$Port"
 
 function Test-PaperObservatoryReady {
     param([string]$Url)
-    try {
-        $r = Invoke-WebRequest -UseBasicParsing -Uri ($Url + '/api/health') -TimeoutSec 2
-        return $r.StatusCode -eq 200
-    } catch { return $false }
+    & curl.exe --noproxy '*' --fail --silent --max-time 2 ($Url + '/api/health') *> $null
+    return $LASTEXITCODE -eq 0
 }
 
 function Test-WeWeReady {
-    try {
-        $r = Invoke-WebRequest -UseBasicParsing -Uri ($weweUrl + '/feeds/all.json') -TimeoutSec 2
-        return $r.StatusCode -eq 200
-    } catch { return $false }
+    & curl.exe --noproxy '*' --fail --silent --max-time 2 ($weweUrl + '/feeds/all.json') *> $null
+    return $LASTEXITCODE -eq 0
 }
 
 # ---- Step 1: Docker engine ----

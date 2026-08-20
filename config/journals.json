@@ -31,24 +31,28 @@
     {
       "name": "Water Research",
       "rss": "https://rss.sciencedirect.com/publication/science/00431354",
+      "issn": "0043-1354",
       "publisher": "ScienceDirect",
       "note": "ScienceDirect 官方 publication RSS（ISSN 0043-1354）"
     },
     {
       "name": "Journal of Membrane Science",
       "rss": "https://rss.sciencedirect.com/publication/science/03767388",
+      "issn": "0376-7388",
       "publisher": "ScienceDirect",
       "note": "ScienceDirect 官方 publication RSS（ISSN 0376-7388）"
     },
     {
       "name": "Desalination",
       "rss": "https://rss.sciencedirect.com/publication/science/00119164",
+      "issn": "0011-9164",
       "publisher": "ScienceDirect",
       "note": "ScienceDirect 官方 publication RSS（ISSN 0011-9164）"
     },
     {
       "name": "Separation and Purification Technology",
       "rss": "https://rss.sciencedirect.com/publication/science/13835866",
+      "issn": "1383-5866",
       "publisher": "ScienceDirect",
       "note": "ScienceDirect 官方 publication RSS（ISSN 1383-5866）"
     },
@@ -68,6 +72,7 @@
     {
       "name": "Journal of Water Process Engineering",
       "rss": "https://rss.sciencedirect.com/publication/science/22147144",
+      "issn": "2214-7144",
       "publisher": "ScienceDirect",
       "note": "ScienceDirect 官方 publication RSS（ISSN 2214-7144）"
     },

@@ -108,7 +108,8 @@ def scan_archive() -> dict:
         jp = day_dir / "articles.json"
         if jp.exists():
             try:
-                arts = json.load(open(jp, "r", encoding="utf-8"))
+                with open(jp, "r", encoding="utf-8") as f:
+                    arts = json.load(f)
             except Exception:
                 arts = []
             kept = []
@@ -553,7 +554,8 @@ def generate_snapshot(target_date: str | None = None) -> dict:
     # ---- 统计论文 ----
     if jp and jp.exists():
         try:
-            arts = json.load(open(jp, "r", encoding="utf-8"))
+            with open(jp, "r", encoding="utf-8") as f:
+                arts = json.load(f)
         except Exception:
             arts = []
         snap["fetched"] = True
@@ -598,6 +600,42 @@ def generate_snapshot(target_date: str | None = None) -> dict:
     snapshots[target_date] = snap
     save_snapshots(snapshots)
     return snap
+
+
+def sync_snapshots_from_archive() -> dict:
+    """补齐归档目录对应的快照，并在归档更新后自动重算。
+
+    外部定时任务、终端或 AI 直接运行 daily.py 时不会经过 Web 的 start_fetch；
+    因此快照不能只依赖 Web 抓取完成回调。
+    """
+    snapshots = load_snapshots()
+    if not ARCHIVE_DIR.is_dir():
+        return snapshots
+
+    today = _today_str()
+    for day_dir in ARCHIVE_DIR.iterdir():
+        if not day_dir.is_dir():
+            continue
+        try:
+            _date_key(day_dir.name)
+            parts = day_dir.name.split(".")
+            if len(parts) != 3 or any(not part.isdigit() for part in parts):
+                continue
+        except Exception:
+            continue
+        article_path = day_dir / "articles.json"
+        if not article_path.exists():
+            continue
+
+        source_mtime = article_path.stat().st_mtime
+        if day_dir.name == today and FUNDS_PATH.exists():
+            source_mtime = max(source_mtime, FUNDS_PATH.stat().st_mtime)
+        snap = snapshots.get(day_dir.name)
+        generated = _parse_iso(snap.get("generated_at")) if isinstance(snap, dict) else None
+        if generated is None or generated.timestamp() < source_mtime:
+            generate_snapshot(day_dir.name)
+            snapshots = load_snapshots()
+    return snapshots
 
 
 def article_uid(a: dict) -> str:
@@ -1011,7 +1049,19 @@ def fetch_dates(account: str | None = None) -> list[dict]:
     return result
 
 
-def start_fetch(start_date: str | None = None, end_date: str | None = None) -> None:
+def _snapshot_dates_for_fetch(start_date: str | None, end_date: str | None) -> list[str]:
+    if not start_date or not end_date:
+        return [_today_str()]
+    start = datetime.strptime(start_date, "%Y-%m-%d").date()
+    end = datetime.strptime(end_date, "%Y-%m-%d").date()
+    if start > end:
+        start, end = end, start
+    count = (end - start).days
+    return [f"{(start + timedelta(days=i)).year}.{(start + timedelta(days=i)).month}.{(start + timedelta(days=i)).day}"
+            for i in range(count + 1)]
+
+
+def start_fetch(start_date: str | None = None, end_date: str | None = None) -> bool:
     """后台跑 daily.py，实现抓取。
 
     start_date/end_date 都为 None：现场抓取今天（--force）
@@ -1020,7 +1070,7 @@ def start_fetch(start_date: str | None = None, end_date: str | None = None) -> N
     global FETCH_STATE
     with FETCH_LOCK:
         if FETCH_STATE["running"]:
-            return
+            return False
         FETCH_STATE.update(running=True, startedAt=now_iso(), finishedAt=None, output="", code=None)
 
     # -u 让子进程逐行输出；页面可实时显示当前抓取阶段，而非一直只显示“抓取中”。
@@ -1072,21 +1122,28 @@ def start_fetch(start_date: str | None = None, end_date: str | None = None) -> N
                     FETCH_STATE["output"] = "".join(output_lines)
 
             reader.join(timeout=1)
+            return_code = proc.returncode
             with FETCH_LOCK:
                 FETCH_STATE.update(
                     running=False,
                     finishedAt=now_iso(),
                     output="".join(output_lines),
-                    code=proc.returncode,
+                    code=return_code,
                 )
-                # 抓取完成后自动生成/更新当日快照
-                try: generate_snapshot()
-                except Exception: pass
+            # 只为本次实际抓取的日期更新快照；自定义历史抓取不能误写成今天。
+            if return_code == 0:
+                try:
+                    reload_paths()
+                    for snapshot_date in _snapshot_dates_for_fetch(start_date, end_date):
+                        generate_snapshot(snapshot_date)
+                except Exception:
+                    pass
         except Exception as e:
             with FETCH_LOCK:
                 FETCH_STATE.update(running=False, finishedAt=now_iso(), output=str(e), code=-1)
 
     threading.Thread(target=worker, daemon=True).start()
+    return True
 
 
 def start_funds_fetch() -> None:
@@ -1250,7 +1307,8 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, FETCH_STATE)
             elif path == "/api/snapshots":
                 # 列出所有快照日期（倒序）
-                snaps = load_snapshots()
+                reload_paths()
+                snaps = sync_snapshots_from_archive()
                 dates = sorted(snaps.keys(), key=lambda d: _date_key(d), reverse=True)
                 json_response(self, {"dates": dates, "total": len(dates)})
             elif path == "/api/deletion-audit":
@@ -1261,7 +1319,8 @@ class Handler(BaseHTTPRequestHandler):
             elif path.startswith("/api/snapshots/"):
                 # 获取某日快照详情
                 snap_date = path[len("/api/snapshots/"):]
-                snaps = load_snapshots()
+                reload_paths()
+                snaps = sync_snapshots_from_archive()
                 if snap_date in snaps:
                     json_response(self, snaps[snap_date])
                 else:
@@ -1280,8 +1339,11 @@ class Handler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         path = parsed.path
         if path == "/api/fetch":
-            start_fetch()
-            json_response(self, {"started": True, "message": "现场抓取已启动"})
+            started = start_fetch()
+            json_response(self, {
+                "started": started,
+                "message": "现场抓取已启动" if started else "已有抓取任务正在运行",
+            })
         elif path == "/api/fetch-custom":
             # 读取 JSON body 中的 start_date / end_date（YYYY-MM-DD）
             start_date = None
@@ -1298,8 +1360,12 @@ class Handler(BaseHTTPRequestHandler):
             if not start_date or not end_date:
                 self._send_error(400, "缺少 start_date / end_date 参数")
                 return
-            start_fetch(start_date=start_date, end_date=end_date)
-            json_response(self, {"started": True, "message": f"自定义抓取已启动（{start_date} ~ {end_date}）"})
+            started = start_fetch(start_date=start_date, end_date=end_date)
+            json_response(self, {
+                "started": started,
+                "message": (f"自定义抓取已启动（{start_date} ~ {end_date}）"
+                            if started else "已有抓取任务正在运行"),
+            })
         elif path == "/api/funds/support-query":
             # 获批/资助项目查询（带验证码）
             length = int(self.headers.get("Content-Length") or 0)

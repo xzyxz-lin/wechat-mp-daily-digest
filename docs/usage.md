@@ -37,7 +37,7 @@ python daily.py --force
 
 ## 开机即推（已禁用）
 
-> **当前状态：已禁用**（`daily-push-startup.vbs.disabled`）。
+> **当前状态：已禁用**。启动文件夹内不应保留 `.disabled` 文件；Windows 仍会尝试打开它并弹出“选择应用”。
 > 原因：用户改为手动通过 Web 观察台抓取，不再需要开机自动推送。
 
 脚本带**幂等判断**：当天已推过就自动跳过，多次触发也只推一次。
@@ -49,7 +49,7 @@ python install_startup.py           # 安装（开机登录后自动静默跑 da
 python install_startup.py --remove  # 卸载
 ```
 
-> 前提：Docker Desktop 需开启「开机自启」（Settings → General → Start Docker Desktop when you sign in），容器已配置 `restart: unless-stopped`。
+> 如重新启用开机推送，必须同时明确恢复 Docker Desktop 自启；当前默认仍是“Docker 不随开机启动”。
 
 ## Web 管理系统（论文观察台）
 

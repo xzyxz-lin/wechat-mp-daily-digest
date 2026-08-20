@@ -13,6 +13,7 @@
 import argparse
 import json
 import msvcrt
+import os
 import sys
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -97,16 +98,49 @@ def _article_key(a):
     return a.get("id") or a.get("url") or a.get("title") or ""
 
 
-def _load_existing_keys(json_path):
-    """读取已存档 articles.json 的文章键集合；不存在则返回空集合。"""
+def _load_existing_articles(json_path):
+    """读取当天已有归档。
+
+    已存在但损坏的 JSON 不能按空列表处理，否则一次重抓就会静默覆盖历史数据。
+    """
     if not json_path.exists():
-        return set()
+        return []
     try:
         with open(json_path, "r", encoding="utf-8") as f:
             old = json.load(f)
-        return {_article_key(a) for a in old if _article_key(a)}
-    except Exception:
-        return set()
+    except Exception as exc:
+        raise RuntimeError(f"已有归档无法读取，已停止写入以保护数据: {json_path}: {exc}") from exc
+    if not isinstance(old, list):
+        raise RuntimeError(f"已有归档格式错误，已停止写入以保护数据: {json_path}")
+    return [a for a in old if isinstance(a, dict)]
+
+
+def _merge_articles(existing, fetched):
+    """按稳定键合并当天旧归档与本次抓取结果，保序且不丢旧数据。"""
+    merged = [dict(a) for a in existing]
+    positions = {
+        key: index
+        for index, article in enumerate(merged)
+        if (key := _article_key(article))
+    }
+    for article in fetched:
+        article = dict(article)
+        key = _article_key(article)
+        if key and key in positions:
+            # 新抓取字段优先，同时保留旧记录中本次响应没有返回的字段。
+            merged[positions[key]] = {**merged[positions[key]], **article}
+        else:
+            if key:
+                positions[key] = len(merged)
+            merged.append(article)
+    return merged
+
+
+def _write_text_atomic(path: Path, content: str) -> None:
+    """先写同目录临时文件，再原子替换，避免中途退出留下半个归档。"""
+    temp_path = path.with_name(path.name + ".tmp")
+    temp_path.write_text(content, encoding="utf-8")
+    os.replace(temp_path, path)
 
 
 def run_one_day(config, target_date, args):
@@ -133,25 +167,49 @@ def run_one_day(config, target_date, args):
     print(f"抓取日期: {target_date_str}")
     print("=" * 50)
 
-    # 1. 抓取
+    existing_articles = _load_existing_articles(json_path)
+    existing_keys = {_article_key(a) for a in existing_articles if _article_key(a)}
+
+    # 1. 抓取。公众号与期刊相互独立，单个来源失败不能阻断另一条链路。
     print("\n[1/4] 抓取文章 ...")
-    articles = fetch_daily(config, target_date)
+    fetched_articles = []
+    source_failures = []
+    mp_count = 0
+    try:
+        mp_articles = fetch_daily(config, target_date)
+        fetched_articles.extend(mp_articles)
+        mp_count = len(mp_articles)
+    except Exception as e:
+        source_failures.append(f"公众号: {e}")
+        print(f"[warning] 公众号抓取失败，继续抓取期刊: {e}")
+
     # 1.1 抓取期刊论文（直连 RSS，与公众号写入同一存档）
     try:
         journal_articles = fetch_journals_daily(config, target_date)
         if journal_articles:
-            articles.extend(journal_articles)
-            print(f"[1/4] 公众号 {len(articles) - len(journal_articles)} 篇 + 期刊 {len(journal_articles)} 篇")
+            fetched_articles.extend(journal_articles)
+        print(f"[1/4] 公众号 {mp_count} 篇 + 期刊 {len(journal_articles)} 篇")
     except Exception as e:
-        print(f"[1/4] 期刊抓取异常（已忽略，不影响公众号）: {e}")
-    if not articles:
-        print(f"{target_date_str} 没有文章，跳过。")
-        return [], False
+        source_failures.append(f"期刊: {e}")
+        print(f"[warning] 期刊抓取失败，已保留公众号结果: {e}")
 
-    # 1.5 增量对比：判断是否有新文章（相对已存档）
-    existing_keys = _load_existing_keys(json_path)
-    new_keys = {_article_key(a) for a in articles if _article_key(a)}
-    has_new = bool(new_keys - existing_keys)
+    if len(source_failures) == 2:
+        raise RuntimeError("；".join(source_failures))
+
+    articles = _merge_articles(existing_articles, fetched_articles)
+    fetched_keys = {_article_key(a) for a in fetched_articles if _article_key(a)}
+    new_count = len(fetched_keys - existing_keys)
+    has_new = new_count > 0
+    print(
+        f"[merge] 已有 {len(existing_articles)} 篇 + 本次抓到 {len(fetched_articles)} 篇"
+        f"（新增 {new_count} 篇）= 合并后 {len(articles)} 篇"
+    )
+
+    if not articles:
+        print(f"{target_date_str} 没有文章，记录本次空拉取结果。")
+        if args.no_local or args.dry_run:
+            return [], False
+
     if not has_new and existing_keys:
         print(f"[no-new] {target_date_str} 无新文章（与已存档一致），跳过邮件发送")
 
@@ -178,9 +236,9 @@ def run_one_day(config, target_date, args):
         day_dir.mkdir(parents=True, exist_ok=True)
         html_path = day_dir / f"{day_folder}.html"
         md_path = day_dir / f"{day_folder}.md"
-        html_path.write_text(html, encoding="utf-8")
-        md_path.write_text(md, encoding="utf-8")
-        json_path.write_text(json.dumps(articles, ensure_ascii=False, indent=2), encoding="utf-8")
+        _write_text_atomic(html_path, html)
+        _write_text_atomic(md_path, md)
+        _write_text_atomic(json_path, json.dumps(articles, ensure_ascii=False, indent=2))
         print(f"  - {html_path}")
         print(f"  - {md_path}")
         print(f"  - {json_path}")

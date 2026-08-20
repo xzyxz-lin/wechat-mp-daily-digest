@@ -699,9 +699,12 @@
           clearInterval(state.fetchPolling);
           resetFetchButton();
           if (s.code === 0) {
-            showToast("抓取完成，已更新归档");
+            const hasWarnings = (s.output || "").includes("[warning]");
+            showToast(hasWarnings ? "抓取完成，但部分来源失败，请查看按钮提示" : "抓取完成，已更新归档", hasWarnings);
+            fetchButton.title = hasWarnings ? (s.output || "").split(/\r?\n/).filter(line => line.includes("[warning]")).join("\n") : "";
             snapshotTime.textContent = new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
             loadOverview();
+            loadSnapshot();
             if (state.view === "account" && state.currentAccount) loadAccountArticles(state.currentAccount, 1);
           } else if (s.code === 2 && (s.output || "").includes("[locked]")) {
             showToast("已有另一项抓取在运行，本次没有重复执行", true);
@@ -723,6 +726,8 @@
     let label = "抓取中…";
     if (latest.startsWith("[journals] 正在抓取：")) {
       label = "抓取中 · " + latest.slice("[journals] 正在抓取：".length);
+    } else if (latest.startsWith("[fetch] 刷新公众号源：")) {
+      label = "刷新中 · " + latest.slice("[fetch] 刷新公众号源：".length).replace(/ \.\.\.$/, "");
     } else if (latest.startsWith("[fetch] 调用")) {
       label = "抓取中 · 公众号源";
     } else if (latest.startsWith("[2/4]")) {

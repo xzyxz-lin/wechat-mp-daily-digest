@@ -119,6 +119,8 @@ def _parse_date(s):
         "%d %B %Y",
         "%d %b %Y",
         "%B %d, %Y",
+        "%B %Y",
+        "%b %Y",
         "%Y-%m-%d",
     ]
     for fmt in fmts:
@@ -271,8 +273,25 @@ def _crossref_date(work):
     return None
 
 
+def _crossref_created_date(work):
+    """取 Crossref 元数据首次登记日期，供只有未来卷期的 RSS 回退使用。"""
+    parts = (work.get("created") or {}).get("date-parts") or []
+    if not parts or not parts[0]:
+        return None
+    try:
+        values = parts[0]
+        return datetime(
+            int(values[0]),
+            int(values[1]) if len(values) > 1 else 1,
+            int(values[2]) if len(values) > 2 else 1,
+            tzinfo=BEIJING,
+        )
+    except (ValueError, TypeError, IndexError):
+        return None
+
+
 def fetch_crossref_one(journal, target_date, proxy=None, timeout=25,
-                       seen_urls=None, lookback_days=7):
+                       seen_urls=None, lookback_days=7, date_basis="published"):
     """用 Crossref 公开元数据补齐已取消或拦截 RSS 的出版商期刊。"""
     from datetime import timedelta
 
@@ -283,12 +302,14 @@ def fetch_crossref_one(journal, target_date, proxy=None, timeout=25,
         return []
 
     cutoff = target_date - timedelta(days=lookback_days)
+    filter_field = "created" if date_basis == "created" else "pub"
     params = {
-        "filter": f"from-pub-date:{cutoff.isoformat()},until-pub-date:{target_date.isoformat()}",
-        "sort": "published",
+        "filter": (f"from-{filter_field}-date:{cutoff.isoformat()},"
+                   f"until-{filter_field}-date:{target_date.isoformat()}"),
+        "sort": "created" if date_basis == "created" else "published",
         "order": "desc",
         "rows": 100,
-        "select": "DOI,title,URL,published-online,published-print,published,issued,abstract",
+        "select": "DOI,title,URL,published-online,published-print,published,issued,created,abstract",
     }
     try:
         resp = requests.get(
@@ -310,7 +331,7 @@ def fetch_crossref_one(journal, target_date, proxy=None, timeout=25,
     for work in works:
         title_parts = work.get("title") or []
         title = clean_latex(title_parts[0] if title_parts else "")
-        pub = _crossref_date(work)
+        pub = _crossref_created_date(work) if date_basis == "created" else _crossref_date(work)
         doi = (work.get("DOI") or "").strip()
         url = (work.get("URL") or (f"https://doi.org/{doi}" if doi else "")).strip()
         if not title or not pub:
@@ -318,10 +339,10 @@ def fetch_crossref_one(journal, target_date, proxy=None, timeout=25,
         local_d = _local_date(pub)
         if local_d < cutoff or local_d > target_date:
             continue
-        if seen_urls and url and url in seen_urls:
+        if seen_urls and any(value and value in seen_urls for value in (url, doi, title)):
             continue
         abstract = (work.get("abstract") or "").strip()
-        kept.append({
+        article = {
             "account": name,
             "category": "期刊",
             "title": title,
@@ -331,8 +352,12 @@ def fetch_crossref_one(journal, target_date, proxy=None, timeout=25,
             "content_html": "",
             "summary": (abstract or title)[:300],
             "id": doi or url or title,
-        })
-    print(f"[journals] {name}: Crossref 共 {len(works)} 篇，窗口内新增 {len(kept)} 篇")
+        }
+        if date_basis == "created":
+            article["source_date_basis"] = "crossref_created"
+        kept.append(article)
+    basis_label = "登记日期" if date_basis == "created" else "出版日期"
+    print(f"[journals] {name}: Crossref({basis_label}) 共 {len(works)} 篇，窗口内新增 {len(kept)} 篇")
     return kept
 
 
@@ -372,6 +397,7 @@ def fetch_one(journal, target_date, proxy=None, timeout=25, seen_urls=None, look
         cutoff = target_date - timedelta(days=lookback_days)
         kept = []
         skipped_old = 0
+        skipped_future = 0
         skipped_dup = 0
         skipped_no_date = 0
         for a in arts:
@@ -383,16 +409,39 @@ def fetch_one(journal, target_date, proxy=None, timeout=25, seen_urls=None, look
             if local_d < cutoff:
                 skipped_old += 1
                 continue
-            url_key = a.get("url") or a.get("id") or ""
-            if seen_urls and url_key and url_key in seen_urls:
+            if local_d > target_date:
+                skipped_future += 1
+                continue
+            identities = (a.get("url"), a.get("id"), a.get("title"))
+            if seen_urls and any(value and value in seen_urls for value in identities):
                 skipped_dup += 1
                 continue
             # 保留这篇
             a.pop("_pub_date", None)
             kept.append(a)
 
+        # ScienceDirect 部分 RSS 只给未来卷期月份，没有真实 online 日期。
+        # 配置了 ISSN 时用 Crossref 的元数据登记日期补齐，避免整刊为 0。
+        if journal.get("issn") and (skipped_no_date or skipped_future):
+            fallback_seen = set(seen_urls or set())
+            for article in kept:
+                for key in ("url", "id", "link", "title"):
+                    if article.get(key):
+                        fallback_seen.add(article[key])
+            crossref_items = fetch_crossref_one(
+                journal,
+                target_date,
+                proxy=proxy,
+                timeout=timeout,
+                seen_urls=fallback_seen,
+                lookback_days=lookback_days,
+                date_basis="created",
+            )
+            kept.extend(crossref_items)
+
         print(f"[journals] {name}: feed 共 {len(arts)} 篇 "
-              f"(窗口内新增 {len(kept)} | 过旧 {skipped_old} | 已存档 {skipped_dup} | 无日期 {skipped_no_date})")
+              f"(窗口内新增 {len(kept)} | 过旧 {skipped_old} | 未来卷期 {skipped_future} "
+              f"| 已存档 {skipped_dup} | 无日期 {skipped_no_date})")
         return kept
     except Exception as e:
         print(f"[journals] {name} 抓取失败: {e}")
@@ -423,25 +472,29 @@ def _load_seen_urls(target_date):
 
     seen: set[str] = set()
     cutoff = target_date - timedelta(days=30)
-    for day_dir in sorted(archive_dir.iterdir(), reverse=True):
+    dated_dirs = []
+    for day_dir in archive_dir.iterdir():
         if not day_dir.is_dir():
             continue
+        try:
+            parts = day_dir.name.split(".")
+            if len(parts) != 3:
+                continue
+            archive_date = date(int(parts[0]), int(parts[1]), int(parts[2]))
+        except Exception:
+            continue
+        if cutoff <= archive_date <= target_date:
+            dated_dirs.append((archive_date, day_dir))
+
+    for _, day_dir in sorted(dated_dirs, key=lambda item: item[0], reverse=True):
         jp = day_dir / "articles.json"
         if not jp.exists():
             continue
-        # 解析目录名 YYYY.M.D → date 对象
         try:
-            parts = day_dir.name.split(".")
-            if len(parts) == 3:
-                d = date(int(parts[0]), int(parts[1]), int(parts[2]))
-                if d < cutoff:
-                    break  # 太旧了，没必要再扫
-        except Exception:
-            continue
-        try:
-            arts = json.load(open(jp, "r", encoding="utf-8"))
+            with open(jp, "r", encoding="utf-8") as f:
+                arts = json.load(f)
             for a in arts:
-                for key in ("url", "id", "link"):
+                for key in ("url", "id", "link", "title"):
                     v = a.get(key)
                     if v:
                         seen.add(v)

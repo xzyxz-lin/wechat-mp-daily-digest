@@ -12,7 +12,7 @@ import sys
 import time
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 import requests
 
@@ -31,6 +31,84 @@ def load_config(path=None):
         return json.load(f)
 
 
+def _local_session(base_url):
+    """为本机 WeWe RSS 创建不继承系统代理的会话。"""
+    host = (urlparse(base_url).hostname or "").lower()
+    session = requests.Session()
+    if host in {"localhost", "127.0.0.1", "::1"}:
+        session.trust_env = False
+    return session
+
+
+def _auth_headers(auth_code=None):
+    return {"Authorization": f"Bearer {auth_code}"} if auth_code else {}
+
+
+def _get_feed_list(session, base_url, headers):
+    resp = session.get(f"{base_url.rstrip('/')}/feeds/", headers=headers, timeout=20)
+    resp.raise_for_status()
+    feeds = resp.json()
+    if not isinstance(feeds, list):
+        raise RuntimeError("WeWe RSS 订阅列表响应格式异常")
+    return feeds
+
+
+def refresh_wewe_feeds(base_url, auth_code=None, timeout_per_feed=30, poll_interval=2):
+    """逐个刷新 WeWe RSS 订阅，避免 Docker 错过定时任务后一直读取旧缓存。
+
+    WeWe RSS 的 ``update=true`` 接口会异步更新数据库，因此这里通过 syncTime
+    轮询确认刷新真正完成。全部失败时抛错，让上层准确标记公众号链路失败；
+    部分失败时保留成功源，同时输出明确警告。
+    """
+    session = _local_session(base_url)
+    headers = _auth_headers(auth_code)
+    feeds = _get_feed_list(session, base_url, headers)
+    if not feeds:
+        raise RuntimeError("WeWe RSS 中没有已订阅公众号")
+
+    succeeded = []
+    failed = []
+    for feed in feeds:
+        feed_id = str(feed.get("id") or "")
+        feed_name = str(feed.get("name") or feed_id or "未知公众号")
+        before = int(feed.get("syncTime") or 0)
+        if not feed_id:
+            failed.append(feed_name)
+            continue
+        print(f"[fetch] 刷新公众号源：{feed_name} ...")
+        try:
+            refresh_started_at = int(time.time())
+            update_url = f"{base_url.rstrip('/')}/feeds/{quote(feed_id)}.json"
+            resp = session.get(
+                update_url,
+                params={"update": "true", "limit": 1},
+                headers=headers,
+                timeout=20,
+            )
+            resp.raise_for_status()
+            deadline = time.monotonic() + timeout_per_feed
+            while time.monotonic() < deadline:
+                time.sleep(poll_interval)
+                current = _get_feed_list(session, base_url, headers)
+                updated = next((item for item in current if item.get("id") == feed_id), None)
+                sync_time = int((updated or {}).get("syncTime") or 0)
+                if updated and (sync_time > before or sync_time >= refresh_started_at):
+                    succeeded.append(feed_name)
+                    break
+            else:
+                failed.append(feed_name)
+        except Exception as exc:
+            print(f"[warning] 公众号源刷新失败：{feed_name}: {exc}")
+            failed.append(feed_name)
+
+    if failed:
+        print(f"[warning] {len(failed)} 个公众号源未完成刷新：{failed}")
+    if not succeeded:
+        raise RuntimeError("所有公众号源刷新均失败，请在 WeWe RSS 账号管理中重新登录")
+    print(f"[fetch] WeWe RSS 刷新完成：成功 {len(succeeded)}，失败 {len(failed)}")
+    return {"succeeded": succeeded, "failed": failed}
+
+
 def fetch_all(base_url, auth_code=None, retries=10, retry_delay=15, limit=2000):
     """调用 WeWe RSS 的 /feeds/all.json 拉取所有文章。
 
@@ -41,16 +119,11 @@ def fetch_all(base_url, auth_code=None, retries=10, retry_delay=15, limit=2000):
     抓取历史日期文章时必须传足够大的 limit，否则会漏掉更早的文章。
     """
     url = f"{base_url.rstrip('/')}/feeds/all.json?limit={limit}"
-    headers = {}
-    if auth_code:
-        headers["Authorization"] = f"Bearer {auth_code}"
+    headers = _auth_headers(auth_code)
     # WeWe RSS runs on this computer.  A system HTTP(S) proxy must not receive
     # localhost traffic; otherwise it can return 502 before the request reaches
     # the local Docker container.  External RSS requests keep their proxy setup.
-    host = (urlparse(base_url).hostname or "").lower()
-    session = requests.Session()
-    if host in {"localhost", "127.0.0.1", "::1"}:
-        session.trust_env = False
+    session = _local_session(base_url)
     last_err = None
     for i in range(retries):
         try:
@@ -141,6 +214,9 @@ def fetch_daily(config, target_date=None):
         for f in wr_cfg.get("feeds", []) if f.get("name")
     }
     whitelist = list(whitelist_map.keys())
+
+    if target_date == date.today() and wr_cfg.get("refresh_before_fetch", True):
+        refresh_wewe_feeds(wr_cfg["base_url"], wr_cfg.get("auth_code"))
 
     print(f"[fetch] 调用 {wr_cfg['base_url']}/feeds/all.json ...")
     data = fetch_all(wr_cfg["base_url"], wr_cfg.get("auth_code"))
